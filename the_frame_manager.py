@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The Frame Manager 3.0 — interface graphique bilingue Windows."""
+"""The Frame Manager 3.0 — bilingual Windows graphical interface."""
 import json, logging, queue, threading, time, re
 from tkinter import simpledialog
 from frame_core import Preferences, DEFAULTS, MATTES, COLORS, FILTERS, valid_ip
@@ -15,7 +15,7 @@ DB = Registry(old.DATA)
 
 
 def _tv_read_enriched():
-    """Toutes les lectures sont non destructives; ne jamais supposer les filtres par photo."""
+    """All TV reads are non-destructive; never infer a per-photo Art filter."""
     tv=old.connect()
     try:
         ver=str(tv.get_api_version())
@@ -27,7 +27,7 @@ def _tv_read_enriched():
                 else:value=getattr(tv,method)()
                 extras[method]={'status':'ok','value':value}
             except Exception as exc:
-                extras[method]={'status':'non disponible','error':str(exc)}
+                extras[method]={'status':'unavailable','error':str(exc)}
         return photos,ver,extras
     finally:
         try:tv.close()
@@ -50,28 +50,27 @@ def _unpack_options(extras):
 
 
 def tv_change(cid,matte=None,portrait=None,filter_id=None):
-    """Change uniquement les paramètres explicitement demandés.
+    """Change only settings explicitly requested by the user.
 
-    Important (LS03B 2022 / API 4.3.4.0): ne PAS envoyer de
-    portrait_matte_id pour une photo paysage. Dans v2.0, ce champ était
-    envoyé à chaque change_matte; un refus Samsung -7 a été constaté.
-    Le filtre n'est PAS relisible via l'inventaire Art; ne pas le présenter
-    comme confirmé par lecture après avoir reçu l'accusé de réception.
-    """
+IMPORTANT (2022 LS03B / Art API 4.3.4.0): do NOT pass
+portrait_matte_id for landscape photos. Version 2.0 included this
+argument on every change_matte call and Samsung returned error -7.
+Per-photo filters cannot be read back via the Art inventory;
+a successful command acknowledgment is not independent verification."""
     if matte is None and filter_id is None:
-        raise ValueError('Aucune modification demandée')
+        raise ValueError('No changes requested')
     tv=old.connect();results={}
     try:
         before=old.photos_unique(tv.available())
         if cid not in before:
-            raise RuntimeError(f'{cid} absent de la TV : aucune écriture')
-        # La lecture du statut aide au diagnostic d'une erreur -7 sans
-        # modifier le mode de fonctionnement du diaporama.
+            raise RuntimeError(f'{cid} is absent from the TV; no changes sent')
+        # Read Art Mode to help diagnose Samsung error -7 without
+        # changing slideshow behavior.
         try:
             mode=tv.get_artmode()
             old.audit('artmode_before_edit',content_id=cid,status=mode)
             if isinstance(mode,str) and mode.lower() not in ('on','true','1'):
-                raise RuntimeError('Le mode Art ne semble pas actif; aucune écriture envoyée')
+                raise RuntimeError('Art Mode does not appear active; no changes sent')
         except RuntimeError:
             raise
         except Exception as exc:
@@ -79,30 +78,30 @@ def tv_change(cid,matte=None,portrait=None,filter_id=None):
         current=before[cid].get('matte_id')
         if matte is not None:
             if current == matte:
-                results['matte']='déjà appliqué; aucune commande envoyée'
+                results['matte']='already applied; no command sent'
                 old.audit('matte_change_skipped',content_id=cid,matte=matte)
             else:
                 old.audit('matte_change_started',content_id=cid,requested=matte,
                           previous=current,portrait_parameter='omitted')
-                # La méthode Python accepte portrait_matte (facultatif),
-                # PAS une obligation. Préserver portrait_matte_id actuel.
+                # The Python API accepts portrait_matte as an optional argument.
+                # Do NOT send it for landscape photos; preserve the existing value.
                 tv.change_matte(cid,matte)
                 for attempt in range(5):
                     if attempt:time.sleep(2)
                     after=old.photos_unique(tv.available())
                     if cid in after and after[cid].get('matte_id')==matte:
-                        results['matte']='confirmé par relecture'
+                        results['matte']='verified by reading TV state'
                         old.audit('matte_change_verified',content_id=cid,matte=matte,
                                   portrait_after=after[cid].get('portrait_matte_id'))
                         break
                 if 'matte' not in results:
-                    raise RuntimeError(f'{cid}: passe-partout non confirmé; aucun filtre envoyé')
+                    raise RuntimeError(f'{cid}: mat was not verified; filter was not sent')
         if filter_id is not None:
             old.audit('filter_change_started',content_id=cid,filter_id=filter_id)
             response=tv.set_photo_filter(cid,filter_id)
             if response is False:
-                raise RuntimeError(f'{cid}: Samsung a retourné False pour set_photo_filter')
-            results['filter']='commande acceptée; effet non vérifiable par relecture'
+                raise RuntimeError(f'{cid}: Samsung returned False for set_photo_filter')
+            results['filter']='command accepted; effect cannot be verified by reading TV state'
             old.audit('filter_change_sent',content_id=cid,filter_id=filter_id,
                       result_type=type(response).__name__)
         return results
@@ -120,31 +119,31 @@ def _upload_one(info,matte,filter_id=None,portrait_matte=None):
         cid=tv.upload(info['path'],matte=matte,portrait_matte=matte if portrait_matte is None else portrait_matte,file_type='jpg')
         old.audit('upload_ack',filename=info['name'],content_id=cid)
         if not isinstance(cid,str) or not re.fullmatch(r'MY_[A-Za-z0-9_-]+',cid):
-            raise RuntimeError('Identifiant non confirmé: ne pas relancer automatiquement')
+            raise RuntimeError('Upload ID unverified; do not retry automatically')
         if cid in before:
-            raise RuntimeError('Identifiant de transfert déjà présent avant l’importation; impossible de confirmer une nouvelle photo')
+            raise RuntimeError('Upload ID already existed before import; cannot verify a new photo')
         valid=False
         for attempt in range(6):
             if attempt:time.sleep(2)
             after=old.photos_unique(tv.available())
             if cid in after:
                 if after[cid].get('matte_id')!=matte:
-                    raise RuntimeError(f'{cid} présent, mais passe-partout différent: {after[cid].get("matte_id")}')
+                    raise RuntimeError(f'{cid} exists, but has a different mat: {after[cid].get("matte_id")}')
                 valid=True;break
-        if not valid:raise RuntimeError(f'{cid} non retrouvé; pas de répétition automatique')
+        if not valid:raise RuntimeError(f'{cid} could not be found; do not retry automatically')
         old.audit('upload_verified',filename=info['name'],content_id=cid,matte=matte,new_id=cid not in before)
-        # Le filtre est appliqué APRÈS enregistrement de la correspondance
-        # dans SQLite, pour ne jamais perdre le lien en cas d'échec du filtre.
+        # Apply the filter AFTER recording the SQLite source-to-TV link;
+        # the association must survive any subsequent filter failure.
         return cid,after[cid]
     finally:
         try:tv.close()
         except Exception:pass
 
 def jpeg_comparison(source):
-    """Prépare des JPEG de comparaison, sans communication avec la TV."""
+    """Prepare local JPEG quality comparisons without contacting the TV."""
     source=Path(source)
     if not source.is_file():
-        raise FileNotFoundError(f'Fichier source introuvable : {source}')
+        raise FileNotFoundError(f'Source file not found: {source}')
     info=old.photo_info(source)
     old.verify_upload(info)
     original_bytes=source.stat().st_size
@@ -163,36 +162,35 @@ def jpeg_comparison(source):
 
 
 def replace_tv_photo(cid,quality,progress=lambda message:None,lang='fr',backup_before=True):
-    """Remplacement à deux phases, sans supprimer l'original en cas d'échec.
+    """Safely replace a photo in two phases without deleting the original on failure.
 
-    1: préparer + téléverser + vérifier + restituer filtre connu ;
-    2: supprimer l'ancien ID seulement si toutes les étapes ont réussi.
-    L'identifiant Samsung change forcément; aucune écriture directe de ses octets.
-    """
+Phase 1: prepare, upload, verify, and restore the known filter.
+Phase 2: delete the previous ID only when every preceding step succeeds.
+Samsung assigns a new content ID; photo bytes are never edited in place."""
     if quality not in (90,85,80,None):
-        raise ValueError('Choisissez Aucune, JPEG 90, JPEG 85 ou JPEG 80 pour le remplacement.')
+        raise ValueError('Choose None, JPEG 90, JPEG 85, or JPEG 80 for replacement.')
     if not re.fullmatch(r'MY_[A-Za-z0-9_-]+',str(cid)):
-        raise ValueError('Seules les photos personnelles MY_ peuvent être remplacées.')
+        raise ValueError('Only personal MY_ photos can be replaced.')
     entry=DB.get_tv(cid)
     if not entry or not entry['present']:
-        raise RuntimeError('Photo non présente dans le dernier inventaire : actualisez la TV.')
+        raise RuntimeError('Photo is absent from the last inventory; refresh the TV.')
     if not entry['local_path']:
-        raise RuntimeError('Aucune correspondance avec un JPEG source Windows pour cette photo.')
+        raise RuntimeError('This photo has no verified Windows source JPEG association.')
     source=Path(entry['local_path'])
     if not source.is_file():
-        raise FileNotFoundError(f'JPEG source indisponible : {source}\nChoisissez le dossier source dans Manager.')
+        raise FileNotFoundError(f'Source JPEG unavailable: {source}\nSelect the source folder in Manager.')
     old.verify_upload(old.photo_info(source))
     sendpath=source if quality is None else optimize(source,quality,old.DATA)
     old.verify_upload(old.photo_info(sendpath))
     source_sha=sha(source)
     new_sha=sha(sendpath)
     new_size=sendpath.stat().st_size
-    # Un remplacement volontaire peut augmenter la taille (ex: 80 -> 90
-    # ou 80 -> original). On refuse seulement les OCTETS identiques connus.
+    # An intentional replacement may increase JPEG size (e.g., 80 → 90
+    # or 80 → original). Reject only known byte-for-byte duplicates.
     prior_sha=entry.get('uploaded_sha256')
     if prior_sha and prior_sha==new_sha:
-        raise RuntimeError(f'{cid} : fichier identique à la version TV enregistrée; remplacement évité.')
-    # Relecture réelle avant toute écriture pour éviter des ID obsolètes.
+        raise RuntimeError(f'{cid}: file matches the recorded TV version; replacement skipped.')
+    # Re-read the TV before writing to detect stale Samsung IDs.
     progress(f'Checking TV: {cid}…' if lang=='en' else f'Contrôle TV : {cid}…')
     tv=old.connect()
     try:
@@ -201,12 +199,12 @@ def replace_tv_photo(cid,quality,progress=lambda message:None,lang='fr',backup_b
         try:tv.close()
         except Exception:pass
     if cid not in before:
-        raise RuntimeError(f'{cid} n’existe plus sur la TV : remplacement annulé.')
+        raise RuntimeError(f'{cid} no longer exists on the TV; replacement cancelled.')
     current=before[cid]
     matte=current.get('matte_id') or 'none'
     portrait=current.get('portrait_matte_id') or 'none'
     filter_id=entry['filter_id'] if entry['filter_source'] else None
-    # Les effets non connus ne peuvent pas être récupérés depuis Samsung.
+    # Samsung cannot report unknown per-photo effects through this API.
     if quality is not None: DB.add_version(sendpath,source,quality)
     backup=DB.backup() if backup_before else None
     DB.operation('replace_photo',source,cid,'préparé',
@@ -221,7 +219,7 @@ def replace_tv_photo(cid,quality,progress=lambda message:None,lang='fr',backup_b
         progress(f'Uploading {label} (previous {cid} untouched)…' if lang=='en' else f'Transfert {label} (ancien {cid} intact)…')
         new_id,obj=_upload_one(old.photo_info(sendpath),matte,portrait_matte=portrait)
         if new_id==cid or new_id in before:
-            raise RuntimeError('Samsung a renvoyé un identifiant déjà existant : aucune suppression autorisée.')
+            raise RuntimeError('Samsung returned an existing photo ID; deletion is prohibited.')
         DB.record_tv_photo(new_id,obj)
         DB.link(new_id,source,method='remplacement après optimisation JPEG')
         DB.record_uploaded_version(new_id,sendpath,quality)
@@ -233,11 +231,11 @@ def replace_tv_photo(cid,quality,progress=lambda message:None,lang='fr',backup_b
             DB.filter_set(new_id,filter_id)
             DB.operation('replace_photo',source,new_id,'filtre_envoyé',
                          {'old_id':cid,'filter_id':filter_id,
-                          'note':'Effet non relisible individuellement depuis Samsung'})
-        # Début de la phase destructive : l'ancienne photo ne sera supprimée
-        # que si le transfert et les paramètres connus ont été acceptés.
+                          'note':'Effect cannot be read back individually from Samsung'})
+        # Destructive phase: delete the previous photo only AFTER
+        # the new upload and restoration of known settings have succeeded.
         progress(f'New photo {new_id} verified; deleting old {cid}…' if lang=='en' else f'Nouvelle photo {new_id} vérifiée ; suppression de {cid}…')
-        old.tv_delete(cid)  # vérifie la disparition par relecture de la TV
+        old.tv_delete(cid)  # Confirm deletion by reading the TV library again.
         DB.mark_replaced(cid,new_id)
         DB.operation('replace_photo',source,new_id,'confirmé',
                      {'old_id':cid,'new_id':new_id,'quality':quality,
@@ -254,37 +252,36 @@ def replace_tv_photo(cid,quality,progress=lambda message:None,lang='fr',backup_b
                       'manual_inspection_required':bool(new_id)})
         old.audit('replace_interrupted',old_cid=cid,new_cid=new_id,quality=quality,error=str(exc))
         if new_id:
-            raise RuntimeError(f'{exc}\nATTENTION : la nouvelle photo {new_id} peut rester sur la TV avec l’ancienne {cid}. Aucune suppression ni relance automatique. Actualisez pour vérifier.') from exc
-        raise RuntimeError(f'{exc}\nAncienne photo {cid} conservée (aucune suppression demandée).') from exc
+            raise RuntimeError(f'{exc}\nWARNING: new photo {new_id} may remain on the TV alongside old photo {cid}. No deletion or automatic retry. Refresh to inspect.') from exc
+        raise RuntimeError(f'{exc}\nOld photo {cid} preserved (no deletion requested).') from exc
 
 
 
 def prepare_jpeg_batch(ids,quality,progress=lambda current,total,cid:None):
-    """Analyse en lecture seule de la TV (via les données SQLite) et des sources.
+    """Preflight the TV photo records and local sources without changing the TV.
 
-    Un gain peut être négatif : meilleure qualité, fichier original, etc.
-    On évite uniquement les versions dont le SHA256 est déjà identique.
-    Les tailles inconnues sur la TV ne sont PAS remplacées par des hypothèses.
-    """
+The size difference can be negative (higher quality or original bytes).
+Skip only a version with the same recorded SHA-256.
+Never guess unknown sizes of older TV uploads."""
     if quality not in (None,90,85,80):
-        raise ValueError('Aucune, JPEG 90, JPEG 85 ou JPEG 80 requis.')
+        raise ValueError('None, JPEG 90, JPEG 85, or JPEG 80 is required.')
     if not ids or len(ids)!=len(set(ids)):
-        raise ValueError('Sélection vide ou identifiants répétés.')
+        raise ValueError('Empty selection or duplicate content IDs.')
     ready=[];skipped=[]
     for n,cid in enumerate(ids,1):
         progress(n,len(ids),cid)
         entry=DB.get_tv(cid)
         reason=None
         if not re.fullmatch(r'MY_[A-Za-z0-9_-]+',str(cid)):
-            reason='Identifiant non personnel'
+            reason='Non-personal photo ID'
         elif not entry or not entry.get('present'):
-            reason='Photo absente du dernier inventaire'
+            reason='Photo absent from the latest inventory'
         elif not entry.get('local_path'):
-            reason='Aucune correspondance Windows confirmée'
+            reason='No verified Windows source association'
         else:
             source=Path(entry['local_path'])
             if not source.is_file():
-                reason='JPEG source introuvable'
+                reason='Source JPEG not found'
             else:
                 try:
                     old.verify_upload(old.photo_info(source))
@@ -294,14 +291,14 @@ def prepare_jpeg_batch(ids,quality,progress=lambda current,total,cid:None):
                     old_bytes=entry.get('uploaded_bytes')
                     new_sha=sha(target)
                     if entry.get('uploaded_sha256')==new_sha:
-                        reason='Fichier déjà identique à la version TV enregistrée (SHA-256)'
+                        reason='File already matches the recorded TV version (SHA-256)'
                     else:
                         ready.append({'cid':cid,'source':str(source),'old_bytes':old_bytes,
                                       'source_bytes':source.stat().st_size,'source_sha256':sha(source),
                                       'new_bytes':new_bytes,'quality':quality,
                                       'filter_known':bool(entry.get('filter_source'))})
                 except Exception as exc:
-                    reason=f'Préparation impossible : {exc}'
+                    reason=f'Could not prepare: {exc}'
         if reason:
             skipped.append({'cid':cid,'reason':reason})
     known=[item for item in ready if item['old_bytes'] is not None]
@@ -318,11 +315,10 @@ def prepare_jpeg_batch(ids,quality,progress=lambda current,total,cid:None):
 
 
 def run_jpeg_batch(plan,stop_event,progress=lambda i,total,cid:None):
-    """Exécute une seule photo à la fois, arrêt à la première anomalie.
+    """Process one photo at a time, stopping on the first error.
 
-    Le drapeau d'arrêt n'est évalué qu'entre les photos : jamais entre
-    l'envoi et la suppression sécurisée d'une même photo.
-    """
+Check the stop flag only between photos, never between
+upload and safely verified deletion of the same photo."""
     ids=plan['ready'];quality=plan['quality']
     results=[];failure=None;cancelled=False;backup=None
     try:
@@ -339,9 +335,9 @@ def run_jpeg_batch(plan,stop_event,progress=lambda i,total,cid:None):
             try:
                 current=DB.get_tv(cid)
                 if not current or not current['present'] or current.get('local_path')!=item['source']:
-                    raise RuntimeError('Correspondance TV/Windows modifiée depuis la préparation : arrêt prudent.')
+                    raise RuntimeError('TV-to-Windows mapping changed since preflight; stopping safely.')
                 if sha(item['source'])!=item['source_sha256']:
-                    raise RuntimeError('JPEG source modifié depuis la préparation : arrêt prudent.')
+                    raise RuntimeError('Source JPEG changed since preflight; stopping safely.')
                 result=replace_tv_photo(cid,quality,backup_before=False)
                 results.append(result)
             except Exception as exc:
@@ -358,7 +354,7 @@ def run_jpeg_batch(plan,stop_event,progress=lambda i,total,cid:None):
             'requested':len(plan['ids']),'ready':len(ids)}
 
 def format_size_variation(delta_bytes, lang='fr'):
-    """Variation de taille des OCTETS JPEG connus, pas de l'espace libre TV."""
+    """Calculate the size difference in known JPEG bytes, not TV free space."""
     amount=abs(delta_bytes)/1e6
     if delta_bytes<0:
         return f'Saving {amount:.2f} MB' if lang=='en' else f'Économie de {amount:.2f} Mo'
@@ -368,13 +364,12 @@ def format_size_variation(delta_bytes, lang='fr'):
 
 
 def tv_jpeg_info(rec, source_bytes=None, lang='fr'):
-    """Libellés JPEG fondés uniquement sur la version réellement consignée dans SQLite.
+    """Report JPEG levels only when recorded explicitly in SQLite.
 
-    quality=None avant le suivi des transferts est 'inconnu', et non 'sans
-    optimisation'. Quand record_uploaded_version() a été appelé avec
-    quality=None, uploaded_sha256 et uploaded_bytes existent : c'est l'envoi
-    du fichier source, sans optimisation par Manager.
-    """
+For older untracked transfers, quality=None means unknown,
+not unoptimized. After record_uploaded_version() is called
+with quality=None, uploaded_sha256 and uploaded_bytes exist,
+confirming the unchanged source was sent."""
     rec=rec or {}
     qual=rec.get('uploaded_quality')
     sent_sha=rec.get('uploaded_sha256')
@@ -389,7 +384,7 @@ def tv_jpeg_info(rec, source_bytes=None, lang='fr'):
         return '—', ('JPEG optimization: unknown (earlier upload not documented)' if lang=='en' else 'Optimisation JPEG : inconnue (ancien transfert non documenté)')
     detail=f'{"JPEG optimization" if lang=="en" else "Optimisation JPEG"} : {label}'
     if isinstance(sent_bytes,int) and sent_bytes>0:
-        detail+=f' · {sent_bytes/1e6:.2f} Mo'
+        detail+=f' · {sent_bytes/1e6:.2f} {"MB" if lang=="en" else "Mo"}'
         if qual in (80,85,90) and isinstance(source_bytes,int) and source_bytes>0:
             saving=(1-sent_bytes/source_bytes)*100
             detail+=f' · {saving:.1f}% smaller than source' if lang=='en' else f' · {saving:.1f} % de moins que le source'
@@ -397,11 +392,10 @@ def tv_jpeg_info(rec, source_bytes=None, lang='fr'):
 
 
 def split_matte_id(matte):
-    """Décoder les IDs Samsung sans inventer de couleur quand matte=none.
+    """Decode Samsung mat IDs without inferring a color when matte=none.
 
-    Une réponse absente ou non reconnue reste inconnue; ne jamais la
-    transformer silencieusement en aucun passe-partout.
-    """
+Missing or unrecognized values remain unknown and must not
+be silently interpreted as no mat."""
     if matte == 'none':
         return 'none', None
     if not isinstance(matte,str) or '_' not in matte:
@@ -420,7 +414,7 @@ def aggregate_values(values,unknown, multiple):
 
 class ManagerV2(old.Manager):
     def __init__(self):
-        # Chargement AVANT le constructeur v1.2 : celui-ci actualise la TV au démarrage.
+        # Load preferences BEFORE the legacy constructor, which refreshes TV state.
         self.prefs_store=Preferences(old.DATA)
         self.prefs=dict(self.prefs_store.data)
         self.lang=self.prefs['language']
@@ -438,16 +432,16 @@ class ManagerV2(old.Manager):
         self._column_save_after=None
         self._sort_state={'tv':None,'local':None}
         super().__init__()
-        # Sous cette taille, les cadres fixes empiètent sur les listes.
+        # At smaller sizes, fixed controls overlap the photo lists.
         self.minsize(920,680)
-        # Le redimensionnement doit rester explicitement actif sur Windows.
-        # La taille minimale protege les commandes fixes du panneau inferieur.
+        # Ensure the Windows window remains explicitly resizable.
+        # Minimum size protects the fixed controls in the lower panel.
         self.resizable(width=True, height=True)
         self.title(self.T('The Frame Manager 3.0 — Samsung The Frame',
                           'The Frame Manager 3.0 — Samsung The Frame'))
 
     def quit_app(self):
-        # Sauvegarder également un glissement tout juste terminé avant de fermer.
+        # Capture any just-completed column resize before closing.
         if hasattr(self,'tv_tree'):
             self._capture_column_widths('tv')
         if hasattr(self,'local_tree'):
@@ -480,7 +474,7 @@ class ManagerV2(old.Manager):
         return self.T('(sans couleur)','(no color)')
 
     def _apply_option_values(self):
-        """Met à jour les choix sans effacer les valeurs agrégées affichées."""
+        """Refresh options without discarding displayed mixed values."""
         styles=[self.unchanged(),self.unknown(),self.multiple()]+list(dict.fromkeys(list(self.matte_types)+list(MATTES[1:])))
         colors=[self.no_color(),self.multiple()]+list(dict.fromkeys(list(self.matte_colors)+list(COLORS)))
         filters=[self.unchanged(),self.unknown(),self.multiple()]+list(dict.fromkeys(list(self.filter_types)+list(FILTERS[1:])))
@@ -489,7 +483,7 @@ class ManagerV2(old.Manager):
         self.filter_combo.configure(values=list(dict.fromkeys(filters)))
 
     def _initial_editor_values(self, ids):
-        """Les lectures TV sont prioritaires; un filtre sans source est inconnu."""
+        """Prefer TV-reported mat values; an unrecorded filter is unknown."""
         if not ids:
             return {'style':self.unchanged(),'color':self.prefs['matte_color'],
                     'filter':self.unchanged()}
@@ -509,7 +503,7 @@ class ManagerV2(old.Manager):
                 'filter':aggregate_values(filters,self.unknown(),self.multiple())}
 
     def _populate_editor(self,ids):
-        """L'état affiché ne déclenche aucune modification par lui-même."""
+        """Displaying a selection must never initiate a TV change."""
         ids=tuple(ids)
         self._selected_tv_ids=ids
         values=self._initial_editor_values(ids)
@@ -558,11 +552,10 @@ class ManagerV2(old.Manager):
         return changed
 
     def _desired_updates(self,ids=None):
-        """Différentiel par photo : préserver les champs non modifiés.
+        """Compute per-photo changes without overwriting unedited fields.
 
-        Les photos sans passe-partout restent telles quelles si seule la
-        couleur change. Ne pas supposer un filtre inconnu = None.
-        """
+Photos with no mat remain unchanged if only a mat color changes.
+An unknown filter is never equivalent to the None filter."""
         ids=tuple(ids or self._selected_tv_ids)
         delta=self._field_changes()
         if not any(delta.values()):return []
@@ -615,14 +608,14 @@ class ManagerV2(old.Manager):
     @staticmethod
     def _tree_column_widths(tree,widths):
         for col,width in zip(tree['columns'],widths):
-            # Ne pas étirer chaque colonne à la largeur de la fenêtre :
-            # Treeview doit pouvoir faire défiler horizontalement le tableau.
+            # Do not stretch every column to the entire window width:
+            # Treeview must retain horizontal scrolling.
             tree.column(col,width=int(width),minwidth=50,stretch=False,anchor='w')
 
     def make_tree(self,parent,columns):
-        """Deux barres de défilement, toujours accolées à la zone visible."""
-        # Le cadre 'parent' est géré par grid par le panneau principal.
-        # Ne pas mêler pack et grid dans cet objet.
+        """Keep both scrollbars attached to the visible Treeview area."""
+        # The parent frame uses grid through the main layout.
+        # Do not mix pack and grid inside the same parent.
         parent.rowconfigure(0,weight=1)
         parent.columnconfigure(0,weight=1)
         tree=ttk.Treeview(parent,columns=columns,show='headings',selectmode='extended')
@@ -643,7 +636,7 @@ class ManagerV2(old.Manager):
         return [int(tree.column(col,'width')) for col in tree['columns']]
 
     def _capture_column_widths(self,side):
-        # Tk finalise le glissement des séparateurs après ButtonRelease.
+        # Tk finalizes column-divider movement after ButtonRelease.
         if not self.winfo_exists():return
         try:
             values=self._column_widths(side)
@@ -660,12 +653,12 @@ class ManagerV2(old.Manager):
             logging.warning('Sauvegarde largeurs colonnes %s : %s',side,exc)
 
     def _schedule_column_width_save(self,side):
-        # Déclenché aussi par des clics de tri sans changer de largeur :
-        # _capture ne sauvegarde que lorsque la largeur a réellement changé.
+        # Sort clicks trigger this event as well; _capture persists
+        # widths only when a real change occurred.
         self.after(120,lambda:self._capture_column_widths(side))
 
     def _begin_batch(self,kind):
-        """Activer l'arrêt volontaire d'un lot, sur le thread Tk uniquement."""
+        """Enable a voluntary batch stop on the Tk main thread only."""
         if self.busy or self._batch_running:return False
         self._batch_running=True
         self._batch_kind=kind
@@ -688,7 +681,7 @@ class ManagerV2(old.Manager):
             tree.heading(col,command=lambda i=ix,which=side:self._sort_tree(which,i))
 
     def _sort_tree(self,side,index=None):
-        """Tri numérique des IDs et qualités; tri naturel des noms de fichiers."""
+        """Sort IDs and JPEG levels numerically; filenames naturally."""
         tree=self.tv_tree if side=='tv' else self.local_tree
         if index is None:
             state=self._sort_state.get(side)
@@ -703,7 +696,7 @@ class ManagerV2(old.Manager):
             v=str(vals[index]) if index<len(vals) else ''
             if not v or v in ('—','?'):
                 return (1,0,())
-            # IDs SRC-00012 et MY_F0428 doivent être triés numériquement.
+            # Sort SRC-00012 and MY_F0428 by their numeric components.
             if (side=='tv' and index in (0,1)) or (side=='local' and index==0):
                 m=re.search(r'(\d+)$',v)
                 return (0,0,int(m.group(1)) if m else -1)
@@ -719,14 +712,14 @@ class ManagerV2(old.Manager):
             return (0,1,v.casefold())
         ordered=sorted(tree.get_children(''),key=key,reverse=reverse)
         for i,item in enumerate(ordered): tree.move(item,'',i)
-        # Affiche le sens du tri par une flèche dans l'en-tête.
+        # Show sort direction using an arrow in the column heading.
         cols=tree['columns']
         for i,col in enumerate(cols):
             label=col+(' ▼' if reverse else ' ▲') if index==i else col
             tree.heading(col,text=label)
 
     def _restore_lists(self,selected_tv=(),selected_local=()):
-        # Recrée les listes sans écrire dans SQLite.
+        # Rebuild table rows without modifying SQLite.
         self._apply_option_values()
         source_ids=DB.source_ids()
         for cid,obj in sorted(self.tv_items.items()):
@@ -832,8 +825,8 @@ class ManagerV2(old.Manager):
                 self._populate_editor(self.tv_tree.selection())
             self.ip_label.configure(text=f'   {old.MODEL}  ·  {old.IP}')
             if old_ip!=old.IP:
-                # Garder l'ancienne base historique mais effacer la liste TV
-                # en attendant la relecture du nouvel appareil.
+                # Keep the historical database but clear the current TV list
+                # until the new device has been queried.
                 self.tv_tree.delete(*self.tv_tree.get_children());self.tv_items={}
                 self.status.set(self.T('Adresse IP mise à jour — reconnexion à la TV…',
                                        'IP address updated — reconnecting to the TV…'))
@@ -855,15 +848,15 @@ class ManagerV2(old.Manager):
         ttk.Button(top,text=self.T('Sauvegarder','Backup'),command=self.make_backup).pack(side='right',padx=4)
         ttk.Button(top,text=self.T('Exporter CSV','Export CSV'),command=self.make_export).pack(side='right',padx=4)
         ttk.Button(top,text=self.T('Actualiser TV','Refresh TV'),command=self.refresh_tv).pack(side='right',padx=4)
-        # IMPORTANT : réserver le pied de fenêtre AVANT le panneau extensible.
-        # Dans v2.0.4, le Label de statut était pack() en dernier ; sous
-        # Windows, la zone principale prenait toute la hauteur et le statut
-        # n'était même plus mappé (reproduit à 1240x780 sous Tk 8.6).
-        # Un pack(side='bottom') avant le pane garantit sa visibilité.
-        # Bandeau du bas : statut extensible + poignée de taille visible.
-        # Sizegrip autorise le glisser depuis le coin inferieur droit,
-        # meme si le theme Windows affiche un rebord de fenetre tres fin.
-        # Important: packer le bandeau AVANT le panneau principal extensible.
+        # IMPORTANT: pack the status footer BEFORE the expanding content pane.
+        # In v2.0.4 the status label was packed last; on Windows the
+        # main pane consumed the entire height and the footer
+        # was not even mapped (reproduced at 1240×780 in Tk 8.6).
+        # Packing the bottom footer first ensures it remains visible.
+        # Bottom strip: expanding status text and a visible resize handle.
+        # Sizegrip enables resizing from the lower-right corner even
+        # if the Windows theme provides only a very thin window border.
+        # Pack the footer BEFORE packing the expanding main pane.
         self.status_footer=ttk.Frame(self)
         self.status_footer.pack(side='bottom',fill='x')
         self.status_bar=ttk.Label(self.status_footer,textvariable=self.status,
@@ -876,8 +869,8 @@ class ManagerV2(old.Manager):
         left=ttk.LabelFrame(pane,text=self.T('Photos sur The Frame','Photos on The Frame'),padding=7);left.grid(row=0,column=0,sticky='nsew')
         mid=ttk.Frame(pane,padding=7);mid.grid(row=0,column=1,sticky='ns')
         right=ttk.LabelFrame(pane,text=self.T('JPEG locaux — sources non modifiées','Local JPEGs — original files untouched'),padding=7);right.grid(row=0,column=2,sticky='nsew')
-        # Les listes occupent les rangées extensibles; les détails restent
-        # en bas à hauteur presque fixe lors du redimensionnement.
+        # Photo lists expand with the window; detail panels remain
+        # almost fixed-height at the bottom.
         left.columnconfigure(0,weight=1);left.rowconfigure(0,weight=1)
         right.columnconfigure(0,weight=1);right.rowconfigure(0,weight=1)
         tv_list_host=ttk.Frame(left);tv_list_host.grid(row=0,column=0,sticky='nsew')
@@ -886,9 +879,9 @@ class ManagerV2(old.Manager):
         self._tree_column_widths(self.tv_tree,self.prefs_store.data['column_widths']['tv'])
         self.tv_tree.bind('<ButtonRelease-1>',lambda e:self._schedule_column_width_save('tv'),add='+')
         self._enable_column_sort(self.tv_tree,'tv')
-        # Le tableau a une hauteur minimale compacte (6 lignes) mais reste
-        # extensible. À 1240x780, la zone de détails et ses boutons restent
-        # ainsi tous visibles au-dessus de la barre de statut.
+        # Keep the table compact (minimum six rows) but expandable.
+        # At 1240×780 the detail panels and controls remain visible
+        # above the status bar.
         self.tv_tree.configure(height=6)
         self.local_tree=self.make_tree(local_list_host,(self.T('ID source','Source ID'),self.T('Fichier','File'),self.T('Dimensions','Dimensions'),'TV'))
         self._tree_column_widths(self.local_tree,self.prefs_store.data['column_widths']['local'])
@@ -919,15 +912,15 @@ class ManagerV2(old.Manager):
         ttk.Label(mid,text=self.T('Ctrl / Maj :\nsélection multiple','Ctrl / Shift:\nmultiple selection'),justify='center').pack(pady=13)
         edit=ttk.LabelFrame(left,text=self.T('Détails TV et édition des paramètres','TV details and settings editor'),padding=7)
         edit.grid(row=1,column=0,sticky='ew',pady=(8,0))
-        # La zone d'image conserve exactement la même hauteur pendant le
-        # chargement et après l'affichage d'une miniature (jusqu'à 320×150).
-        # pack_propagate(False) empêche l'image de redimensionner ce panneau.
+        # Keep the preview slot the same height while thumbnails
+        # load and after they appear (maximum 320×150).
+        # pack_propagate(False) prevents images from resizing this panel.
         self.tv_preview_slot=ttk.Frame(edit,width=340,height=168)
         self.tv_preview_slot.pack(fill='x')
         self.tv_preview_slot.pack_propagate(False)
         self.tv_preview=ttk.Label(self.tv_preview_slot,text=self.T('Miniature TV','TV thumbnail'),anchor='center')
         self.tv_preview.pack(fill='both',expand=True)
-        # Trois lignes utiles, même hauteur pour chaque sélection.
+        # Use three detail lines with stable height for every selection.
         self.tv_detail_slot=ttk.Frame(edit,height=63)
         self.tv_detail_slot.pack(fill='x',pady=(5,0))
         self.tv_detail_slot.pack_propagate(False)
@@ -965,10 +958,10 @@ class ManagerV2(old.Manager):
         self.local_detail.pack(fill='both',expand=True)
         self.tv_ref=None;self.local_ref=None
         self._populate_editor(())
-        # Barre de statut déjà installée juste sous la barre de titre.
+        # The footer was already packed before the main title bar.
 
     def background(self,job,on_success=None):
-        # Les commandes TV sont interdites pendant une opération en cours.
+        # Block TV commands while another operation is running.
         super().background(job,on_success)
         self._update_apply_button()
 
@@ -1006,9 +999,9 @@ class ManagerV2(old.Manager):
                                 self.T('Attendez la fin du traitement actuel avant de changer de dossier.',
                                        'Wait until the current operation finishes before changing folders.'))
             return
-        # La boîte de dialogue Windows ne permet pas de connaître le nombre de
-        # fichiers avant sa fermeture. Dès qu'un dossier est choisi, afficher
-        # le début de l'analyse puis envoyer l'avancement depuis le worker.
+        # The Windows folder dialog does not reveal the file count until
+        # the user closes it. Display indexing status immediately after
+        # selection, then stream progress updates from the worker.
         folder=filedialog.askdirectory(title=self.T('Dossier des JPEG sources','Source JPEG folder'))
         if not folder:return
         source_dir=Path(folder)
@@ -1016,7 +1009,7 @@ class ManagerV2(old.Manager):
         self.status.set(self.T(
             f'Préparation de l’indexation du dossier {source_dir.name}…',
             f'Preparing to index folder {source_dir.name}…'))
-        self.update_idletasks()  # visible avant le démarrage du thread
+        self.update_idletasks()  # Make the status visible before starting the worker thread.
 
         def task():
             found={};errors=[]
@@ -1026,7 +1019,7 @@ class ManagerV2(old.Manager):
             self.q.put(('status',self.T(
                 f'Indexation des JPEG : 0/{total} · calcul des empreintes…',
                 f'Indexing JPEGs: 0/{total} · calculating fingerprints…'),None))
-            # Afficher environ 50 étapes au maximum, sans saturer l'interface.
+            # Show at most about 50 progress steps to avoid overloading the UI.
             interval=max(1,(total+49)//50)
             for n,p in enumerate(files,1):
                 try:
@@ -1072,7 +1065,7 @@ class ManagerV2(old.Manager):
             if len(keys)!=1:
                 self.local_detail.configure(text=(self.T(f'{len(keys)} photos sélectionnées; détails masqués.',f'{len(keys)} photos selected; details hidden.') if keys else self.T('Sélectionnez une photo.','Select a photo.')));return
             info=self.local_items[keys[0]];db=DB.get_local(keys[0]);
-            self.local_detail.configure(text=f"{(db or {}).get('source_id') or '—'} · {info['name']}\n{info['width']} × {info['height']} · {info['bytes']/1e6:.2f} Mo\n16:9 : {self.T('Oui','Yes') if info['ratio_ok'] else self.T('Non','No')} · JPEG 1920×1080 : {self.T('Oui','Yes') if info['exact'] and info['format']=='JPEG' else self.T('Non','No')}\nSHA-256 : {(db or {}).get('sha256','?')[:16]}…\npHash : {(db or {}).get('phash','?')}")
+            self.local_detail.configure(text=f"{(db or {}).get('source_id') or '—'} · {info['name']}\n{info['width']} × {info['height']} · {info['bytes']/1e6:.2f} {self.T('Mo','MB')}\n16:9 : {self.T('Oui','Yes') if info['ratio_ok'] else self.T('Non','No')} · JPEG 1920×1080 : {self.T('Oui','Yes') if info['exact'] and info['format']=='JPEG' else self.T('Non','No')}\nSHA-256 : {(db or {}).get('sha256','?')[:16]}…\npHash : {(db or {}).get('phash','?')}")
             self._image(self.local_preview,keys[0],'local_ref')
             return
         keys=self.tv_tree.selection()
@@ -1158,7 +1151,7 @@ class ManagerV2(old.Manager):
     def change_selected(self):
         ids=list(self.tv_tree.selection())
         if not ids:return
-        # Ne jamais déclencher une commande pour la simple sélection d'une photo.
+        # Simply selecting a photo must never send a TV command.
         if not any(self._field_changes().values()):return
         try:plans=self._desired_updates(ids)
         except ValueError as exc:
@@ -1194,7 +1187,7 @@ class ManagerV2(old.Manager):
                     succeeded.append(cid)
                 except Exception as exc:
                     DB.operation('change_settings',cid=cid,status='erreur',detail=str(exc))
-                    raise RuntimeError(f'{len(succeeded)} modifications faites; arrêt sur {cid}: {exc}')
+                    raise RuntimeError(f'{len(succeeded)} changes completed; stopped at {cid}: {exc}')
             return len(succeeded),cancelled,_tv_read_enriched()
         def done(result):
             count_done,cancelled,library=result
@@ -1211,8 +1204,8 @@ class ManagerV2(old.Manager):
         self._update_apply_button()
 
     def _source_for_comparison(self):
-        # Lorsque les deux listes ont une sélection, comparer la dernière
-        # liste utilisée; ne pas imposer la sélection TV à l'utilisateur.
+        # When both lists have selections, use the list the user last
+        # interacted with; do not force the TV selection.
         if getattr(self,'last_selection_side',None)=='local':
             local=self.local_tree.selection()
             if len(local)==1:
@@ -1222,16 +1215,16 @@ class ManagerV2(old.Manager):
             cid=selected[0]
             rec=DB.get_tv(cid)
             if not rec or not rec.get('local_path'):
-                raise ValueError(f'{cid} : aucune correspondance avec un fichier source.\nChoisissez le dossier JPEG original à droite.')
+                raise ValueError(f'{cid}: no matching source file.\nSelect the original JPEG folder on the right.')
             p=Path(rec['local_path'])
             if not p.is_file():
-                raise FileNotFoundError(f'{cid} : source Windows introuvable :\n{p}\nChoisissez le dossier source.')
+                raise FileNotFoundError(f'{cid}: Windows source not found:\n{p}\nSelect the source folder.')
             return p
         if len(selected)>1:
-            raise ValueError('Sélectionnez une seule photo TV pour cette comparaison.')
+            raise ValueError('Select exactly one TV photo for comparison.')
         paths=self.local_tree.selection()
         if len(paths)!=1:
-            raise ValueError('Sélectionnez une photo TV associée ou un JPEG local à droite.')
+            raise ValueError('Select a matched TV photo or one local JPEG on the right.')
         return Path(paths[0])
 
     def compare_selected(self):
@@ -1259,7 +1252,7 @@ class ManagerV2(old.Manager):
             delta=(self.T('Original','Original') if row['quality'] is None else
                    (self.T(f"{row['percent']:.1f} % plus léger",f"{row['percent']:.1f}% smaller") if row['percent']>=0
                     else self.T(f"{-row['percent']:.1f} % plus lourd",f"{-row['percent']:.1f}% larger")))
-            ttk.Label(b,text=f"{row['bytes']/1e6:.2f} Mo",font=('Segoe UI',11,'bold')).pack()
+            ttk.Label(b,text=f"{row['bytes']/1e6:.2f} {self.T('Mo','MB')}",font=('Segoe UI',11,'bold')).pack()
             ttk.Label(b,text=delta).pack()
         ttk.Label(pane,text=self.T('Extraits centraux de 470 × 225 px, sans redimensionnement (zoom logique 100 %).','Center crops, 470 × 225 px, without resizing (100% logical zoom).'),
                   foreground='#666').pack(anchor='w',pady=(7,6))
@@ -1283,7 +1276,7 @@ class ManagerV2(old.Manager):
         self.status.set(self.T(f'Comparaison créée : {report["source"].name} · aucune modification TV',f'Comparison created: {report["source"].name} · TV unchanged'))
 
     def stop_jpeg_batch(self):
-        """Commande d'arrêt pour tous les lots, sans interruption d'une photo."""
+        """Request cancellation between photos for any supported batch operation."""
         if not self._batch_running:return
         self._stop_batch.set()
         self.stop_batch_btn.state(['disabled'])
@@ -1291,7 +1284,7 @@ class ManagerV2(old.Manager):
                                'Stop requested: finishing the current photo safely…'))
 
     def replace_selected_tv(self):
-        """Prévisualisation et traitement d'un lot; confirmation avant toute écriture TV."""
+        """Preflight a batch and request confirmation before any TV write."""
         ids=tuple(self.tv_tree.selection())
         if not ids:
             return messagebox.showwarning(self.T('Sélection','Selection'),self.T(
@@ -1352,8 +1345,8 @@ class ManagerV2(old.Manager):
                      'Sauvegarde SQLite avant le lot; JPEG sources intacts. Continuer ?')
             if not messagebox.askyesno(self.T('CONFIRMER le lot JPEG','CONFIRM JPEG batch'),msg,icon='warning'):
                 return
-            # Le premier callback se termine et libère self.busy dans poll()
-            # avant d'autoriser un nouveau background; éviter le conflit d'état.
+            # The first callback must finish and release self.busy in poll()
+            # before another worker can start, avoiding a state race.
             self.after_idle(lambda:self._start_jpeg_batch(plan))
         self.background(prepare,prepared)
         if self.busy:
@@ -1390,8 +1383,8 @@ class ManagerV2(old.Manager):
             change=(format_size_variation(delta,self.lang) if known else
                     self.T('non calculable (taille TV antérieure inconnue)',
                            'unavailable (prior TV size unknown)'))
-            # Ces chiffres représentent les tailles d'envoi documentées par Manager,
-            # pas le stockage physique réellement libéré par le système Samsung.
+            # These figures represent JPEG transfer sizes tracked by Manager,
+            # not physical Samsung storage freed on the TV.
             if self.lang=='en':
                 summary=(f'Completed: {len(completed)}/{result["ready"]}\n'
                          f'Skipped during preparation: {len(result["skipped"])}\n'
@@ -1440,7 +1433,7 @@ class ManagerV2(old.Manager):
         if known:
             if not unknown:return messagebox.showinfo(self.T('Déjà présentes','Already on TV'),self.T(f'{len(known)} photos reconnues déjà sur la TV. Aucun doublon créé.',f'{len(known)} matching photos are already on the TV. No duplicates created.'))
             messagebox.showinfo(self.T('Doublons évités','Duplicates avoided'),self.T(f'{len(known)} photo(s) reconnue(s) déjà présentes seront exclues du transfert.',f'{len(known)} photo(s) already on the TV will be skipped.'))
-        # Ancien contrôle manuel utile, mais le quota Art peut être différent du stockage système.
+        # The legacy storage check is useful, but the Art quota may differ from system storage.
         if not self.check_storage(upload_infos=unknown):return
         if not messagebox.askyesno(self.T('Confirmer importation','Confirm import'),
             self.T(f'Importer {len(unknown)} JPEG(s) · optimisation : {self.quality.get()} · forcer neutre : {"oui" if force else "non"} ?\nEn cas d’erreur -11, arrêt immédiat.',
@@ -1462,7 +1455,7 @@ class ManagerV2(old.Manager):
                     if quality:DB.add_version(sendpath,p,quality)
                     inf=old.photo_info(sendpath)
                     cid,obj=_upload_one(inf,matte,filt)
-                    # après confirmation mettre d'abord à jour TV, puis association persistante
+                    # After verification, update TV state before committing the source link.
                     DB.record_tv_photo(cid,obj)
                     DB.link(cid,p)
                     DB.record_uploaded_version(cid,sendpath,quality)
@@ -1475,11 +1468,11 @@ class ManagerV2(old.Manager):
                             DB.operation('filter',p,cid,'envoyé_non_relisible',{'filter':filt})
                         except Exception as ef:
                             DB.operation('filter',p,cid,'non_confirmé',{'filter':filt,'error':str(ef)})
-                            raise RuntimeError(f'Photo {cid} déjà importée, mais filtre non appliqué : {ef}')
+                            raise RuntimeError(f'Photo {cid} was uploaded, but its filter was not applied: {ef}')
                 except Exception as exc:
                     DB.operation('upload',p,status='erreur',detail=str(exc))
                     old.audit('batch_interrupted',completed=completed,failed=p.name,error=str(exc))
-                    raise RuntimeError(f'{len(completed)} photo(s) vérifiée(s) puis arrêt sur {p.name}: {exc}')
+                    raise RuntimeError(f'{len(completed)} photo(s) verified; stopped at {p.name}: {exc}')
                 time.sleep(0.5)
             return completed,cancelled,_tv_read_enriched()
         def done(result):
@@ -1509,7 +1502,7 @@ class ManagerV2(old.Manager):
                     DB.operation('delete',cid=cid,status='confirmé');done.append(cid)
                 except Exception as exc:
                     DB.operation('delete',cid=cid,status='erreur',detail=str(exc))
-                    raise RuntimeError(f'{len(done)} suppressions confirmées, arrêt sur {cid} : {exc}')
+                    raise RuntimeError(f'{len(done)} deletions verified; stopped at {cid}: {exc}')
             return done,cancelled,_tv_read_enriched()
         def complete(result):
             done,cancelled,library=result;self.update_tv(library)
@@ -1549,7 +1542,7 @@ class ManagerV2(old.Manager):
         if entered is None:
             old.audit('storage_preflight_cancelled',count=len(infos),sum_mb=round(total_mb,2))
             return False
-        # Accept English (and French) unit expressions, e.g. 2.4 GB.
+        # Accept English and French units, e.g., 2.4 GB.
         text_value=entered.strip().lower().replace('gb','go').replace('mb','mo')
         try:
             free_mb=old.parse_free_space_mb(text_value)

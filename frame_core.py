@@ -1,16 +1,14 @@
-"""The Frame Manager 3.0 — noyau commun.
+"""The Frame Manager 3.0 — shared application core.
 
-API Samsung, JPEG, base SQLite et préférences.
-Aucune donnée personnelle incluse dans cette distribution.
-Les fichiers de données sont créés localement à l’exécution.
-"""
+Samsung Art API integration, JPEG processing, SQLite and preferences.
+No personal data is bundled with this distribution.
+Local data files are created at runtime."""
 
-# ========== 1. Téléviseur et opérations historiques sécurisées ==========
+# Section 1: Samsung TV integration and verified legacy operations
 #!/usr/bin/env python3
-"""The Frame Manager v1.2 — Windows 11, Samsung The Frame 2022.
-Dépendances : samsungtvws>=3.0.4, Pillow, packaging.
-Aucune suppression automatique. Toute écriture est vérifiée par une nouvelle lecture.
-"""
+"""The Frame Manager v1.2 compatibility code — Windows 11, Samsung The Frame 2022.
+Dependencies: samsungtvws>=3.0.4, Pillow and packaging.
+Never delete automatically; verify every write by reading the TV again."""
 import hashlib
 import json
 import logging
@@ -49,7 +47,7 @@ def audit(kind, **details):
 
 def photos_unique(items):
     if not isinstance(items, list):
-        raise RuntimeError('Réponse bibliothèque inattendue : liste absente')
+        raise RuntimeError('Unexpected library response: expected a list')
     found = {}
     for obj in items:
         if not isinstance(obj, dict):
@@ -73,14 +71,14 @@ def photo_info(path):
 
 def verify_upload(info):
     if info['format'] != 'JPEG' or not info['exact'] or info['bytes'] > 15_000_000:
-        raise ValueError(f"{info['name']} : JPEG 1920×1080 et taille ≤15 Mo exigés")
+        raise ValueError(f"{info['name']} : JPEG must be 1920×1080 and no larger than 15 MB")
 
 
 def connect():
     from importlib.metadata import version
     from packaging.version import Version
     if Version(version('samsungtvws')) < Version('3.0.4'):
-        raise RuntimeError('samsungtvws >= 3.0.4 requis')
+        raise RuntimeError('samsungtvws >= 3.0.4 is required')
     from samsungtvws import SamsungTVArt
     return SamsungTVArt(IP, port=8002, timeout=25, token_file=str(TOKEN),
                         name='TheFrameManagerWindows')
@@ -91,7 +89,7 @@ def tv_read():
     try:
         version = tv.get_api_version()
         if not version:
-            raise RuntimeError('API Art non disponible')
+            raise RuntimeError('Art Mode API is unavailable')
         return photos_unique(tv.available()), str(version)
     finally:
         try: tv.close()
@@ -107,18 +105,18 @@ def tv_upload(info):
         cid = tv.upload(info['path'], matte='none', portrait_matte='none', file_type='jpg')
         audit('upload_ack', filename=info['name'], content_id=cid)
         if not isinstance(cid, str) or not cid.startswith('MY_'):
-            raise RuntimeError('Identifiant de transfert invalide; vérifiez la TV avant de réessayer')
+            raise RuntimeError('Invalid upload ID; check the TV before retrying')
         for attempt in range(5):
             if attempt: time.sleep(2)
             after = photos_unique(tv.available())
             if cid in after:
                 matte = after[cid].get('matte_id')
                 if matte != 'none':
-                    raise RuntimeError(f'Photo présente ({cid}), mais passe-partout={matte!r}')
+                    raise RuntimeError(f'Photo exists ({cid}), but mat is {matte!r}')
                 audit('upload_verified', filename=info['name'], content_id=cid, matte=matte,
                       new_id=cid not in before)
                 return cid
-        raise RuntimeError(f'Transfert annoncé ({cid}) mais non confirmé par lecture; ne pas relancer aveuglément')
+        raise RuntimeError(f'Upload acknowledged ({cid}) but not verified on the TV; do not retry blindly')
     finally:
         try: tv.close()
         except Exception: pass
@@ -126,14 +124,14 @@ def tv_upload(info):
 
 def tv_delete(cid):
     if not re.fullmatch(r'MY_[A-Za-z0-9_-]+', cid):
-        raise ValueError('Suppression refusée : identifiant non personnel')
+        raise ValueError('Deletion refused: content ID is not a personal photo')
     tv = connect()
     try:
         before = photos_unique(tv.available())
         if cid not in before:
-            raise RuntimeError(f'{cid} absent avant suppression; opération annulée')
+            raise RuntimeError(f'{cid} not found before deletion; operation cancelled')
         audit('delete_started', content_id=cid)
-        # samsungtvws expose delete(content_id) ; une seule suppression par appel.
+        # samsungtvws exposes delete(content_id); delete one photo per call.
         tv.delete(cid)
         audit('delete_sent', content_id=cid)
         for attempt in range(5):
@@ -142,26 +140,25 @@ def tv_delete(cid):
             if cid not in after:
                 audit('delete_verified', content_id=cid)
                 return
-        raise RuntimeError(f'Suppression {cid} non confirmée; vérifier avant toute répétition')
+        raise RuntimeError(f'Deletion of {cid} was not verified; inspect the TV before retrying')
     finally:
         try: tv.close()
         except Exception: pass
 
 
 def _thumbnail_image(data):
-    """Décode JPEG/PNG fourni par Samsung et fabrique une vraie miniature JPEG.
+    """Decode Samsung-supplied JPEG/PNG bytes and produce a valid JPEG thumbnail.
 
-    La TV peut renvoyer des données PNG alors que la photo d'origine est JPEG.
-    On ne se fie ni au nom renvoyé par Samsung ni à son extension.
-    """
+Samsung may return PNG data even when the original photo is a JPEG.
+Never rely on Samsung response filenames or extensions."""
     import io
     if not isinstance(data, (bytes, bytearray)) or not 100 < len(data) < 20_000_000:
-        raise RuntimeError('Réponse miniature vide ou de taille anormale')
+        raise RuntimeError('Empty or unusually large thumbnail response')
     with Image.open(io.BytesIO(data)) as source:
-        source.load()  # Force le décodage : une simple ouverture ne suffit pas.
+        source.load()  # Force decoding; opening the image alone is not enough.
         img = ImageOps.exif_transpose(source).convert('RGB')
     if not img.width or not img.height:
-        raise RuntimeError('Dimensions de miniature invalides')
+        raise RuntimeError('Invalid thumbnail dimensions')
     original_size = img.size
     img.thumbnail((640, 360), Image.Resampling.LANCZOS)
     out = io.BytesIO()
@@ -170,38 +167,37 @@ def _thumbnail_image(data):
 
 
 def _thumbnail_result(result, cid):
-    """Interprète la réponse de samsungtvws.get_thumbnail_list().
+    """Interpret the result of samsungtvws.get_thumbnail_list().
 
-    L'API nomme ses entrées 'MY_F0003.jpg' ou 'MY_F0003.png', PAS 'MY_F0003'.
-    """
+The API returns names such as MY_F0003.jpg or MY_F0003.png,
+not just the content ID MY_F0003."""
     if isinstance(result, dict):
         if not result:
-            raise RuntimeError('Samsung a renvoyé une liste de miniatures vide')
+            raise RuntimeError('Samsung returned an empty thumbnail list')
         for name, data in result.items():
             if str(name).rsplit('.', 1)[0] == cid:
                 return data, str(name)
         if len(result) == 1:
             name, data = next(iter(result.items()))
-            logging.warning('Nom de miniature inattendu pour %s : %r', cid, name)
+            logging.warning('Unexpected thumbnail filename for %s: %r', cid, name)
             return data, str(name)
-        raise RuntimeError(f'Miniature de {cid} absente de la réponse Samsung')
+        raise RuntimeError(f'Thumbnail for {cid} is missing from Samsung response')
     if isinstance(result, (bytes, bytearray)):
         return result, cid
-    raise RuntimeError(f'Type de réponse miniature inattendu : {type(result).__name__}')
+    raise RuntimeError(f'Unexpected thumbnail response type: {type(result).__name__}')
 
 
 def tv_thumbnail(cid, info=None):
-    """Récupère en lecture seule une miniature, avec cache local et journal.
+    """Retrieve a thumbnail without modifying the TV; use a local cache and audit log.
 
-    Pour l'API Art 4.3.4.0 du The Frame 2022, get_thumbnail a été remplacée
-    par get_thumbnail_list. Le transfert D2D peut prendre quelques secondes.
-    """
+On the 2022 Frame Art API 4.3.4.0, get_thumbnail_list replaces
+get_thumbnail. D2D transfers may take several seconds."""
     if not re.fullmatch(r'MY_[A-Za-z0-9_-]+', cid):
-        raise ValueError('Identifiant de photo personnelle invalide')
+        raise ValueError('Invalid personal-photo content ID')
     cache = DATA / 'miniatures_v2'
     cache.mkdir(exist_ok=True)
-    # Le nom contient la date Samsung : évite un cache périmé si MY_F0001
-    # est réattribué à une autre photo après réinitialisation du Smart Hub.
+    # Include the Samsung image date in the cache key to avoid stale
+    # thumbnails if MY_F0001 is reused after a Smart Hub reset.
     info = info or {}
     fingerprint = f"{cid}|{info.get('image_date', '')}|{info.get('width', '')}|{info.get('height', '')}"
     suffix = hashlib.sha256(fingerprint.encode('utf-8')).hexdigest()[:12]
@@ -212,10 +208,10 @@ def tv_thumbnail(cid, info=None):
                 cached.verify()
             return target
         except Exception:
-            logging.warning('Cache de miniature illisible : %s ; nouveau téléchargement', target)
+            logging.warning('Unreadable thumbnail cache: %s; downloading again', target)
     last_error = None
-    # Deux tentatives pour des miniatures en cours de génération par Samsung.
-    # En cas d'échec, ne modifie rien sur le téléviseur.
+    # Retry once when Samsung is still generating a thumbnail.
+    # A failed thumbnail request never changes anything on the TV.
     for attempt in range(1, 3):
         tv = None
         try:
@@ -228,7 +224,7 @@ def tv_thumbnail(cid, info=None):
                 raw, server_name = _thumbnail_result(tv.get_thumbnail(cid), cid)
                 method = 'get_thumbnail'
             image_bytes, dimensions = _thumbnail_image(raw)
-            # Écriture atomique pour ne pas créer un cache JPEG tronqué.
+            # Write atomically to avoid leaving a truncated JPEG cache entry.
             tmp = cache / (target.stem + '_' + uuid.uuid4().hex + '.tmp')
             try:
                 tmp.write_bytes(image_bytes)
@@ -242,7 +238,7 @@ def tv_thumbnail(cid, info=None):
             return target
         except Exception as exc:
             last_error = exc
-            logging.warning('Miniature %s tentative %d/2 : %s', cid, attempt, exc, exc_info=True)
+            logging.warning('Thumbnail %s attempt %d/2: %s', cid, attempt, exc, exc_info=True)
             if attempt < 2:
                 time.sleep(2)
         finally:
@@ -250,14 +246,13 @@ def tv_thumbnail(cid, info=None):
                 try: tv.close()
                 except Exception: pass
     audit('thumbnail_failed', content_id=cid, error=repr(last_error))
-    raise RuntimeError(f'Échec de la récupération de la miniature {cid} : {last_error}')
+    raise RuntimeError(f'Unable to retrieve thumbnail {cid}: {last_error}')
 
 
 def parse_free_space_mb(value):
-    """Lit une mesure MANUELLE de stockage Samsung en Mo ou Go décimaux.
+    """Parse a MANUALLY entered Samsung storage figure in decimal MB or GB.
 
-    Ne prétend jamais lire la mémoire de la TV via le réseau.
-    """
+Do not claim this reads the TV memory through the network."""
     text = str(value).replace('\u00a0', ' ').strip().lower()
     match = re.fullmatch(r'(\d+(?:[\.,]\d+)?)\s*(mo|mb|go|gb)', text)
     if not match:
@@ -269,10 +264,9 @@ def parse_free_space_mb(value):
 
 
 def estimate_capacity(infos, free_mb):
-    """Vérification conservatrice non garantie: fichiers + 50 % + réserve 300 Mo.
+    """Conservative, unverified capacity estimate: files + 50% + 300 MB reserve.
 
-    La taille interne finale, les caches et le quota Art sont inconnus.
-    """
+Final internal image size, caches and Art Mode quota are unknown."""
     if not infos:
         raise ValueError('Aucune photo à analyser.')
     total_bytes = sum(int(item['bytes']) for item in infos)
@@ -490,11 +484,10 @@ class Manager(tk.Tk):
 
 
     def check_storage(self, upload_infos=None):
-        """Compare taille JPEG du lot et libre TV fourni par l'utilisateur.
+        """Compare the JPEG batch size with user-supplied TV free space.
 
-        En mode upload, aucune importation n'est autorisée si la comparaison est
-        défavorable ou si l'utilisateur annule la saisie.
-        """
+During uploads, abort if the capacity estimate is unfavorable
+or the user cancels the prompt."""
         if upload_infos is None:
             keys = list(self.local_tree.selection())
             candidates = [self.local_items[k] for k in keys] if keys else list(self.local_items.values())
@@ -567,7 +560,7 @@ class Manager(tk.Tk):
         except ValueError as exc:
             messagebox.showerror('Fichier non compatible', str(exc))
             return
-        # Contrôle d'espace avant TOUTE écriture. Valeur Samsung saisie par l'utilisateur.
+        # Check available space before any upload; the value is entered by the user.
         if not self.check_storage(upload_infos=infos):
             return
         if not messagebox.askyesno('Confirmer le transfert',
@@ -633,8 +626,8 @@ class Manager(tk.Tk):
 
 
 
-# ========== 2. Persistance SQLite et traitement JPEG ==========
-"""Noyau persistant de The Frame Manager v2, sans effets de bord sur la TV."""
+# Section 2: SQLite persistence and JPEG processing
+"""Persistent core of The Frame Manager v2; does not alter TV state."""
 import csv, hashlib, json, os, sqlite3, threading, uuid, time
 from pathlib import Path
 from datetime import datetime
@@ -649,12 +642,12 @@ def sha(path):
         for c in iter(lambda:f.read(1024*1024),b''): h.update(c)
     return h.hexdigest()
 def phash(path):
-    """pHash 64 bits DCT sans numpy; bit-significatif stable, non preuve unique."""
+    """64-bit DCT perceptual hash without NumPy; helpful signal, not proof of identity."""
     import math
     with Image.open(path) as source:
         im=ImageOps.exif_transpose(source).convert('L').resize((32,32),Image.Resampling.LANCZOS)
         pixels=list(im.getdata())
-    # DCT séparable: 1024x8x2 additions plutôt que 64 x 1024 boucles trig
+    # Separable DCT: 1024 × 8 × 2 additions instead of 64 × 1024 trigonometric loops.
     ct=[[math.cos((2*x+1)*u*math.pi/64) for x in range(32)] for u in range(8)]
     rows=[[sum(pixels[y*32+x]*ct[u][x] for x in range(32)) for u in range(8)] for y in range(32)]
     coeff=[sum(rows[y][u]*ct[v][y] for y in range(32)) for v in range(8) for u in range(8)]
@@ -681,8 +674,8 @@ def optimize(source,quality,root):
         with Image.open(source) as im:
             exif=im.getexif().tobytes() if im.getexif() else None
             icc=im.info.get('icc_profile')
-            # source Cropper déjà 1920x1080, pas de recadrage ni redimensionnement
-            if im.format!='JPEG' or im.size!=(1920,1080): raise ValueError('JPEG 1920x1080 requis')
+            # The cropped source is already 1920×1080; do not resize or crop it.
+            if im.format!='JPEG' or im.size!=(1920,1080): raise ValueError('1920x1080 JPEG required')
             opts={'format':'JPEG','quality':quality,'subsampling':0,'optimize':True}
             if exif:opts['exif']=exif
             if icc:opts['icc_profile']=icc
@@ -708,15 +701,15 @@ class Registry:
             CREATE INDEX IF NOT EXISTS idx_local_sha ON local_photos(sha256);
             CREATE INDEX IF NOT EXISTS idx_tv_local ON tv_photos(local_path);
             ''')
-            # Migration non destructive des bases SQLite v2.0 à v2.0.2.
+            # Non-destructive migration of SQLite databases from v2.0 through v2.0.2.
             present={row['name'] for row in self.db.execute('PRAGMA table_info(tv_photos)')}
             for field,decl in (
                 ('uploaded_sha256','TEXT'),('uploaded_bytes','INTEGER'),
                 ('uploaded_quality','INTEGER'),('uploaded_version_path','TEXT')):
                 if field not in present:
                     self.db.execute(f'ALTER TABLE tv_photos ADD COLUMN {field} {decl}')
-            # Identifiant SOURCE : stable d'une session à l'autre et indépendant
-            # des identifiants MY_Fxxxx attribués par Samsung lors des remplacements.
+            # SOURCE IDs remain stable across sessions and independent of Samsung
+            # MY_Fxxxx IDs, which change whenever a photo is replaced.
             loc_cols={r['name'] for r in self.db.execute('PRAGMA table_info(local_photos)')}
             if 'source_id' not in loc_cols:
                 self.db.execute('ALTER TABLE local_photos ADD COLUMN source_id TEXT')
@@ -725,11 +718,10 @@ class Registry:
             self.db.commit()
 
     def _assign_missing_source_ids_locked(self):
-        """À appeler avec self.lock détenu, avant le commit de la transaction.
+        """Call with self.lock held, before committing the transaction.
 
-        Les ID existants ne changent jamais; les nouveaux sont attribués par
-        ordre de nom de fichier, de façon reproductible lors de la migration.
-        """
+Existing IDs never change. New IDs are assigned in filename order
+for a deterministic migration."""
         rows=self.db.execute("SELECT source_id FROM local_photos WHERE source_id LIKE 'SRC-%'").fetchall()
         sequence=max((int(row[0][4:]) for row in rows if row[0][4:].isdigit()),default=0)
         missing=self.db.execute("""SELECT path FROM local_photos
@@ -773,11 +765,11 @@ class Registry:
         p=phash(path)
         with self.lock:
             rows=self.db.execute('SELECT path, phash FROM local_photos').fetchall()
-        if not rows:return None,'aucun fichier local',None
+        if not rows:return None,'no local file',None
         distances=sorted((ham(p,r['phash']),r['path']) for r in rows)
         if distances[0][0]<=5 and (len(distances)==1 or distances[1][0]-distances[0][0]>=5):
-            return distances[0][1],'pHash probable (non confirmé)',distances[0][0]
-        return None,'ambigu ou éloigné',distances[0][0]
+            return distances[0][1],'Probable pHash match (unverified)',distances[0][0]
+        return None,'ambiguous or distant match',distances[0][0]
     def tv_inventory(self,photos):
         stamp=now()
         with self.lock:
@@ -792,7 +784,7 @@ class Registry:
                     (cid,json.dumps(obj,ensure_ascii=False),obj.get('matte_id'),obj.get('portrait_matte_id'),filt,fs,loc,method,dist,stamp))
             self.db.execute('INSERT INTO snapshots(time,kind,payload) VALUES(?,?,?)',(stamp,'tv_inventory',json.dumps(photos,ensure_ascii=False)));self.db.commit()
     def record_tv_photo(self,cid,obj):
-        """Ajoute/actualise UNE photo confirmée sans marquer les autres absentes."""
+        """Insert or update ONE verified TV photo without marking other photos absent."""
         with self.lock:
             prev=self.db.execute('SELECT * FROM tv_photos WHERE content_id=?',(cid,)).fetchone()
             fs=prev['filter_source'] if prev else None
@@ -807,7 +799,7 @@ class Registry:
                 (cid,json.dumps(obj,ensure_ascii=False),obj.get('matte_id'),obj.get('portrait_matte_id'),filt,fs,loc,method,dist,now()))
             self.db.commit()
     def record_uploaded_version(self,cid,uploaded_path,quality):
-        """Indique la version envoyée, sans déduire la version des photos anciennes."""
+        """Record the actual uploaded version; never infer quality for older uploads."""
         uploaded_path=Path(uploaded_path)
         with self.lock:
             self.db.execute('''UPDATE tv_photos
@@ -818,7 +810,7 @@ class Registry:
             self.db.commit()
 
     def mark_replaced(self,old_cid,new_cid):
-        """Marque l'ancien ID absent UNIQUEMENT après suppression vérifiée de la TV."""
+        """Mark the old content ID absent ONLY after verified deletion from the TV."""
         with self.lock:
             self.db.execute('UPDATE tv_photos SET present=0 WHERE content_id=?',(old_cid,))
             self.db.commit()
@@ -830,7 +822,7 @@ class Registry:
         with self.lock:
             self.db.execute('UPDATE tv_photos SET filter_id=?,filter_source=? WHERE content_id=?',(filter_id,'écrit par Manager — lecture de confirmation indisponible',cid));self.db.commit()
     def import_old_logs(self,events):
-        """Importation de traces vérifiées antérieures, sans inventer de chemin ni de SHA."""
+        """Import earlier verified operation records without inventing paths or hashes."""
         log=Path(events)
         if not log.exists():return 0
         pairs=[];startfiles={}
@@ -867,10 +859,9 @@ class Registry:
         return folder
 
 
-# ========== 3. Configuration et préférences ==========
-"""Préférences locales non sensibles pour The Frame Manager.
-Stockées dans the_frame_manager_data, indépendamment des scripts mis à jour.
-"""
+# Section 3: Configuration and preferences
+"""Local, non-sensitive preferences for The Frame Manager.
+Stored in the_frame_manager_data, independently of application updates."""
 from pathlib import Path
 import json, ipaddress, os, tempfile
 
@@ -911,7 +902,7 @@ def normalize(raw):
     for key,choices in [('jpeg_quality',QUALITIES),('matte_style',MATTES),('matte_color',COLORS),('art_filter',FILTERS)]:
         if raw.get(key) in choices:out[key]=raw[key]
     if isinstance(raw.get('force_neutral'),bool):out['force_neutral']=raw['force_neutral']
-    # Largeurs persistantes, sans jamais reprendre des dimensions corrompues.
+    # Persist column widths; reject invalid or corrupted dimensions.
     raw_columns=raw.get('column_widths')
     if isinstance(raw_columns,dict):
         for side,count in (('tv',5),('local',4)):
@@ -919,7 +910,7 @@ def normalize(raw):
             if isinstance(sizes,(list,tuple)) and len(sizes)==count and all(
                     isinstance(x,int) and not isinstance(x,bool) and 50<=x<=1600 for x in sizes):
                 out['column_widths'][side]=list(sizes)
-    # Chaque normalisation dispose de sa propre copie des sous-dictionnaires.
+    # Each normalization gets its own copy of nested dictionaries.
     out['column_widths']={side:list(widths) for side,widths in out['column_widths'].items()}
     return out
 
@@ -934,11 +925,11 @@ class Preferences:
             except (OSError,ValueError,UnicodeError):pass
         return dict(DEFAULTS)
     def save(self,values):
-        # Les dialogues de paramètres (anciens et nouveaux) ne doivent pas
-        # effacer les largeurs de colonnes mémorisées.
+        # Both legacy and current settings dialogs must preserve saved
+        # column widths.
         merged={**self.data,**values}
         data=normalize(merged)
-        # Validation stricte en écriture : ne jamais enregistrer un champ IP invalide.
+        # Validate the IP address strictly before saving it.
         data['ip']=valid_ip(merged.get('ip',''))
         self.path.parent.mkdir(parents=True,exist_ok=True)
         tmp=None
