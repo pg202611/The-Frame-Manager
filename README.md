@@ -50,16 +50,6 @@ No cloud account, paid API, or ChatGPT subscription is needed to run the applica
 
 The program creates a private `the_frame_manager_data/` folder when first used. **Do not upload or share that folder.**
 
-## Upgrading from version 2.1.x
-
-1. Close the previous version completely.
-2. Back up the **entire** `the_frame_manager_data/` folder, including any `manager_v2.sqlite-wal` and `manager_v2.sqlite-shm` files that may be present.
-3. Extract v3.0 into a **new program folder**, rather than mixing old and new Python scripts.
-4. Copy your backed-up `the_frame_manager_data/` directory into the new v3.0 folder.
-5. Install dependencies if needed, launch `lancer_manager.bat`, and verify your source IDs, TV associations, IP address, JPEG settings, and column widths.
-
-The database file intentionally retains the name `manager_v2.sqlite` for compatibility with existing records. The application does **not** modify your original source JPEGs.
-
 ## How JPEG replacement works
 
 For a photo already on the TV, you can choose **Original (no optimization)**, **JPEG 90**, **JPEG 85**, or **JPEG 80**. You can move between these versions in either direction, even when the new file is larger.
