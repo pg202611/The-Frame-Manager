@@ -1,0 +1,25 @@
+THE FRAME MANAGER 3.0.1 — PUBLIC ENGLISH EDITION
+
+This ZIP contains the clean English-language release for GitHub.
+It is not a copy of the developer's working data directory.
+
+CHANGES SINCE 3.0
+- Removed all JPEG comparison and replacement commands and workflows.
+- Preserved optional JPEG optimization for NEW imports.
+- Preserved photo import, delete, mat/effect editing, batch stop, and metadata tracking.
+- Public application interface, comments, messages and documentation are in English.
+- Simplified the shared core by dropping unused legacy GUI methods.
+
+SECURITY
+No personal JPEGs, tokens, local network addresses, preferences, SQLite databases,
+operation logs, or other working data are included.
+The application creates its own private data directory when first launched.
+
+GITHUB UPDATE
+Replace the existing source files and README.md in the repository.
+Add start_manager.bat and remove the old lancer_manager.bat to avoid confusion.
+If a GitHub Release ZIP already exists, replace the asset with this ZIP.
+
+LIMITATION
+Tested with a simulated local GUI and stubbed TV API; not tested on a real TV
+in this public English-only configuration. Back up and test a small batch first.

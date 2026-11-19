@@ -1,98 +1,123 @@
-# The Frame Manager 3.0
+# The Frame Manager 3.0.1
 
-**An unofficial Windows photo manager for Samsung The Frame Art Mode**
+**An unofficial, English-language Windows photo manager for Samsung The Frame Art Mode.**
 
-The Frame Manager is a free, community-built Python application created with help from ChatGPT. It lets you manage the photos in your Samsung The Frame's Art Mode directly from a Windows PC, without having to rely on the TV remote or SmartThings for routine photo management.
+The Frame Manager is a Python desktop application built with assistance from ChatGPT. It allows you to browse, import, delete, and configure Art Mode photos from a Windows computer, without relying on SmartThings or the TV remote for routine library management.
 
-The software was developed and tested primarily with a **2022 Samsung The Frame 32-inch (LS03B)**. Compatibility with other models or firmware versions **is not guaranteed**. It is not affiliated with or endorsed by Samsung.
+> **Important:** This edition deliberately **does not offer JPEG comparison or replacement of photos already on the TV**. A previous mass-replacement workflow was followed by a slideshow problem on one tested TV. The slideshow worked again after a Smart Hub reset and fresh import, but the precise cause was not established. The feature was removed as a precaution.
 
-> **Start small:** Back up your data and test the application with one to three photos before running any batch operation.
+Developed and tested primarily with a **2022 Samsung The Frame, 32-inch (LS03B)**. Compatibility with other models and firmware versions is **not guaranteed**. This project is independent of Samsung.
 
 ## Features
 
-- **Browse and organize:** View Art Mode photos and TV thumbnails alongside your local JPEG collection.
-- **Import and delete:** Upload or remove individual photos or batches, with TV-side verification.
-- **Mats and filters:** Change mat styles, mat colors, and available Art Mode filters, individually or in batches.
-- **JPEG optimization:** Compare the original with JPEG quality 90, 85, and 80; choose the balance between visual quality and file size.
-- **Reversible replacement:** Replace a TV photo with any supported JPEG version, including restoring the unoptimized original. Upload and verification happen before the previous TV photo is deleted.
-- **Batch controls:** Monitor progress in the status bar and request **Stop after this photo** during batch operations.
-- **Photo tracking:** Maintain stable source-photo IDs, TV-to-source associations, operation history, and a local SQLite database.
-- **Customizable interface:** Sort and resize columns, remember their widths and other preferences, and use the interface in **English or French**.
-- **Exports and backups:** Export CSV records and create local database backups.
+- **Browse two libraries:** View TV photos and thumbnails alongside JPEG files on your computer.
+- **Import photos:** Upload one photo or a batch, checking each new upload against the TV inventory.
+- **Optional optimization when importing:** Upload an unchanged JPEG or optimize it at JPEG quality **90, 85, or 80**. Your original Windows files are never modified.
+- **Delete photos:** Remove TV copies individually or in batches, with a verification step. Local originals remain untouched.
+- **Mats and Art effects:** Change available mat styles, mat colors, and artistic filters individually or for selected groups.
+- **Safe batch controls:** Monitor progress in the bottom status bar and request **Stop after current photo** without interrupting a photo mid-operation.
+- **Source ID tracking:** Track stable source IDs, TV IDs, photo metadata, and history in a local SQLite database.
+- **Sortable tables:** Sort by column, resize columns, and keep their widths across sessions.
+- **Exports and backups:** Export CSV data and back up the local database.
 
-**Not included:** The separate photo-cropping application used during development and the experimental art-filter preview. Source photos must already meet the upload requirements below.
+### Intentionally excluded
+
+- **Replace JPEG / batch JPEG replacement:** Not available in this edition; there is no replacement workflow hidden behind the interface.
+- **Compare JPEGs:** The dedicated quality-comparison window and its processing code have been removed.
+- **Automated cropping:** The separate cropper used in the development project is not part of this package.
+- **PC-driven slideshow:** The TV's built-in slideshow is used. There is no continuous PC connection required after a normal upload or settings operation.
 
 ## Requirements
 
-- Windows 11 (the tested environment).
-- Python **3.12**, with the Windows `py` launcher available.
-- A Samsung The Frame with compatible Art Mode API functionality, reachable from the PC on the same trusted local network.
-- Source images in **JPEG format, exactly 1920 × 1080 pixels, no larger than 15 MB** for upload.
-- Python packages listed in [`requirements.txt`](requirements.txt): `samsungtvws`, `Pillow`, and `packaging`.
+- Windows 11 (tested platform).
+- Python **3.12** with the Windows `py` launcher.
+- A compatible Samsung The Frame TV reachable on the **same trusted local network**.
+- JPEG source files of **1920 × 1080** pixels, up to **15 MB** each, for upload.
+- Dependencies listed in [`requirements.txt`](requirements.txt): `samsungtvws`, `Pillow`, and `packaging`.
 
-No cloud account, paid API, or ChatGPT subscription is needed to run the application.
+No ChatGPT account, cloud account, or subscription is required to run the program.
 
-## Installation (Windows)
+## Installation
 
-1. Install [Python 3.12](https://www.python.org/downloads/) and make sure the Windows `py` launcher is installed.
-2. Download the public release ZIP and extract its **files into a new folder**.
-3. Open **Command Prompt** in that folder and install dependencies:
+1. Install [Python 3.12](https://www.python.org/downloads/) and its Windows `py` launcher.
+2. Download the release ZIP and extract all files into a **new folder**.
+3. Open Command Prompt in that folder and run:
 
    ```bat
    py -3.12 -m pip install -r requirements.txt
    ```
 
-4. Double-click **`lancer_manager.bat`**.
-5. Open **Settings / Paramètres**, enter **your own TV's local IPv4 address**, and save. **No TV IP address is preconfigured** in this release.
-6. Approve the connection on your TV if prompted.
-7. Select your local source-JPEG folder. Verify the detected photos and TV associations before sending changes to the TV.
-8. If you prefer English, select it in **Settings / Paramètres**.
+4. Double-click **`start_manager.bat`**.
+5. In **Settings**, enter the local IPv4 address of **your own TV**. The public release does **not** contain a preconfigured address.
+6. Allow TV pairing if Samsung prompts for authorization.
+7. Select your local JPEG folder, review the detected photos, and start by testing a **small batch of 1–3 photos**.
 
-The program creates a private `the_frame_manager_data/` folder when first used. **Do not upload or share that folder.**
+The public edition's interface, comments, diagnostics, and documentation are in **English**. The private/personal edition of the project is maintained separately.
 
-## How JPEG replacement works
+## Using the program
 
-For a photo already on the TV, you can choose **Original (no optimization)**, **JPEG 90**, **JPEG 85**, or **JPEG 80**. You can move between these versions in either direction, even when the new file is larger.
+### Importing photos
 
-For each replacement, the app prepares the selected version from your local source JPEG, uploads it, checks that it is present on the TV, and restores known mat/filter settings before removing the previous TV photo. The TV normally assigns a **new Samsung content ID**; the app keeps the source-photo ID stable in its local database.
+Select JPEGs from the right-hand library. In the middle panel, choose **None**, **JPEG 90**, **JPEG 85**, or **JPEG 80** under *JPEG optimization*. Click **Import** and confirm. Each source JPEG remains unchanged on your PC.
 
-**Important:** A replacement needs enough temporary space for the new photo **before** the old one can be deleted. If the TV rejects the upload or an expected setting cannot be restored, the app attempts to preserve the old photo and stops the batch rather than blindly continuing. A failed operation may leave an extra uploaded copy that requires manual review.
+If the TV returns Samsung error **`-11`** (insufficient space), stop and inspect the TV; free space in the general TV settings is not always the same as available Art Mode storage.
 
-## Known limitations
+### Editing Art Mode settings
 
-- **Art filters cannot be reliably read back per photo** through the tested API. The app records filters it applied itself, but an unknown filter remains *unknown*—not necessarily *none*. Filters changed using the remote or SmartThings may not be reflected in its database.
-- The TV may report **`-11` (insufficient space)** despite showing available space in its general storage settings.
-- Samsung's **Art Mode API is unofficially accessed through a third-party library**, and behavior can change with different TV models or firmware updates.
-- The app has been tested primarily with **one 2022 32-inch The Frame**; features may not work on every model.
-- There is no guarantee against data loss or other software/device issues. Keep your own originals and backups.
+Select one or more TV photos from the left-hand library. Change only the desired mat, color, or Art effect and click **Apply to selected photos**. A filter applied by the program is recorded locally, but the tested API does **not reliably reveal the active filter for each photo**. An unknown filter must not be interpreted as *None*.
+
+### Removing photos
+
+Select TV entries and click **Delete**, confirming the action. Deleting removes copies **from the TV**, not the corresponding source JPEGs on Windows.
+
+### Batch cancellation
+
+Use **Stop after current photo** while a batch is running. The current photo is allowed to complete before subsequent photos are skipped. This is a voluntary stop mechanism, not an emergency termination of a Samsung operation.
+
+## Upgrading from 3.0 or 2.1.x
+
+1. Close the previous program completely.
+2. Back up the entire `the_frame_manager_data/` folder, including `manager_v2.sqlite-wal` and `manager_v2.sqlite-shm` if they exist.
+3. Extract 3.0.1 into a **new program folder**. Do **not** mix obsolete Python scripts with this release.
+4. Copy the old `the_frame_manager_data/` into the new folder, or start fresh if your Smart Hub was reset and previous Samsung photo IDs no longer represent the same photos.
+5. Launch `start_manager.bat` and refresh the TV inventory before applying changes.
+
+The database file retains the historical filename `manager_v2.sqlite` for compatibility. Avoid sharing it publicly.
+
+## Known limitations and safety notes
+
+- Samsung's Art Mode API is accessed through an **unofficial third-party library**, and behavior can change across models and firmware versions.
+- Successful upload and mat changes can be verified from the TV inventory; **per-photo filter effects cannot be independently verified through the tested API**.
+- A slideshow problem was observed after mass JPEG replacement on the development TV. The issue was resolved after a Smart Hub reset and fresh import, but causation remains **unproven**. The related feature has therefore been removed.
+- No software can guarantee that TV firmware or storage will never fail. **Back up all original images and test with small batches first.**
 
 ## Privacy and security
 
-The **public release archive** does not include the developer's photos, device-pairing token, local SQLite database, operation logs, personal Windows paths, personal TV IP address, or preferences. It does not add project-specific telemetry. It connects to the TV configured by the user through the third-party `samsungtvws` package.
+This public source/release ZIP contains **no personal photos, original JPEGs, device-pairing token, personal IP address, SQLite database, operation logs, or developer preferences**. It does not introduce project-specific telemetry.
 
-Once you use the app, **`the_frame_manager_data/` becomes private**. It can contain:
+The application will create `the_frame_manager_data/` at runtime. That folder may contain sensitive information, including:
 
-- `token.txt` — Samsung connection/pairing token.
-- `preferences.json` — TV IP address and user preferences.
-- `manager_v2.sqlite`, `-wal`, `-shm` — photo metadata, file paths, and history.
-- `journal.log`, `operations.jsonl`, exports, backups, caches, and thumbnails.
+- `token.txt` — Samsung pairing/connection token.
+- `preferences.json` — TV IP address and local settings.
+- `manager_v2.sqlite` and its journal files — photo associations, file paths, and operation history.
+- `journal.log`, `operations.jsonl`, exports, backups, optimized image copies, and thumbnails.
 
-**Never publish your working application folder, private data directory, original photos, logs, or screenshots revealing private images or paths.** Share only a clean source/release archive. The included `.gitignore` reduces accidental uploads but is not an absolute security guarantee.
+**Never upload your working data directory, personal photos, logs, or full post-use program folder to GitHub.** Share only a clean source ZIP. The included `.gitignore` helps but does not prevent every possible mistake.
 
-## Project files
+## Files
 
 ```text
-The_Frame_Manager_3.0/
-├── the_frame_manager.py   # Interface, photo lists, and batch operations
-├── frame_core.py          # Samsung API, JPEG handling, SQLite, and preferences
-├── lancer_manager.bat     # Windows launcher
-├── requirements.txt       # Python dependencies
-├── README.md              # This guide
-└── .gitignore             # Excludes private runtime data and image files
+The-Frame-Manager/
+├── the_frame_manager.py  # English desktop interface and batch operations
+├── frame_core.py         # TV API, JPEG imports, SQLite and preferences
+├── start_manager.bat     # Windows launcher
+├── requirements.txt      # Python dependencies
+├── README.md             # Documentation
+└── .gitignore            # Excludes private local data and images
 ```
 
-## Acknowledgments and disclaimer
+## Credits and license
 
-Built with assistance from ChatGPT and the open-source [`samsungtvws`](https://github.com/xchwarze/samsung-tv-ws-api) package. **Samsung**, **The Frame**, and **SmartThings** are trademarks of their respective owners. This is an independent, unofficial project.
+Created with ChatGPT assistance, using the open-source [`samsungtvws`](https://github.com/xchwarze/samsung-tv-ws-api) project. Samsung, The Frame, Art Mode, and SmartThings belong to their respective trademark owners.
 
-If you want others to be legally allowed to modify and redistribute the code, add an appropriate open-source **`LICENSE`** file to the repository. Publishing a repository publicly by itself does not grant such permissions.
+This project is not associated with, sponsored by, or supported by Samsung. Refer to the **LICENSE** file in the repository, if present, for redistribution rights. Making a repository public does not automatically establish an open-source license.

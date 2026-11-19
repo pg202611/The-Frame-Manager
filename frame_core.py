@@ -1,4 +1,4 @@
-"""The Frame Manager 3.0 — shared application core.
+"""The Frame Manager 3.0.1 — shared application core.
 
 Samsung Art API integration, JPEG processing, SQLite and preferences.
 No personal data is bundled with this distribution.
@@ -268,10 +268,10 @@ def estimate_capacity(infos, free_mb):
 
 Final internal image size, caches and Art Mode quota are unknown."""
     if not infos:
-        raise ValueError('Aucune photo à analyser.')
+        raise ValueError('No photos to analyze.')
     total_bytes = sum(int(item['bytes']) for item in infos)
     if total_bytes <= 0:
-        raise ValueError('La taille totale des fichiers est nulle.')
+        raise ValueError('The total file size is zero.')
     total_mb = total_bytes / 1_000_000
     recommended_mb = 1.5 * total_mb + 300
     return {'count': len(infos), 'sum_bytes': total_bytes, 'sum_mb': total_mb,
@@ -283,7 +283,7 @@ Final internal image size, caches and Art Mode quota are unknown."""
 class Manager(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title('The Frame Manager v1.2 — Samsung 32 po')
+        self.title('The Frame Manager v1.2 — Samsung 32-inch')
         self.geometry('1240x780')
         self.minsize(920, 590)
         self.tv_items = {}
@@ -294,7 +294,7 @@ class Manager(tk.Tk):
         self.busy = False
         self.photo_ref = None
         self.folder = None
-        self.status = tk.StringVar(value='Prêt — actualisez les photos du téléviseur.')
+        self.status = tk.StringVar(value='Ready — refresh the TV photo library.')
         self.build()
         self.after(100, self.poll)
         audit('session_start', ip=IP, model=MODEL)
@@ -302,65 +302,13 @@ class Manager(tk.Tk):
         if IP:
             self.refresh_tv()
         else:
-            self.status.set('Configurez l’adresse IP du téléviseur dans Paramètres pour commencer. / Set TV IP in Settings.')
+            self.status.set('Set your TV IP address in Settings to begin.')
 
-    def build(self):
-        style = ttk.Style(self)
-        if 'vista' in style.theme_names(): style.theme_use('vista')
-        top = ttk.Frame(self, padding=12)
-        top.pack(fill='x')
-        ttk.Label(top, text='THE FRAME MANAGER 1.2', font=('Segoe UI', 17, 'bold')).pack(side='left')
-        ttk.Label(top, text=f'   {MODEL}  •  {IP}', foreground='#666').pack(side='left')
-        ttk.Button(top, text='Actualiser la TV', command=self.refresh_tv).pack(side='right')
-        pane = ttk.Frame(self, padding=(12, 4, 12, 4))
-        pane.pack(fill='both', expand=True)
-        pane.columnconfigure(0, weight=1)
-        pane.columnconfigure(2, weight=1)
-        pane.rowconfigure(0, weight=1)
-        left = ttk.LabelFrame(pane, text='Photos sur la TV', padding=8)
-        left.grid(row=0, column=0, sticky='nsew')
-        right = ttk.LabelFrame(pane, text='Photos à ajouter — ordinateur', padding=8)
-        right.grid(row=0, column=2, sticky='nsew')
-        middle = ttk.Frame(pane, padding=(8, 20))
-        middle.grid(row=0, column=1, sticky='ns')
-        self.tv_tree = self.make_tree(left, ('Identifiant', 'Résolution', 'Passe-partout'))
-        self.local_tree = self.make_tree(right, ('Fichier', 'Résolution', '16:9'))
-        self.tv_tree.bind('<<TreeviewSelect>>', lambda _: self.show_selected('tv'))
-        self.local_tree.bind('<<TreeviewSelect>>', lambda _: self.show_selected('local'))
-        ttk.Button(right, text='Choisir un dossier…', command=self.choose_folder).pack(fill='x', pady=(8, 0))
-        ttk.Label(middle, text='Opérations', font=('Segoe UI', 10, 'bold')).pack(pady=(45, 15))
-        self.upload_btn = ttk.Button(middle, text='← Ajouter', command=self.upload_selected)
-        self.upload_btn.pack(fill='x', pady=5)
-        self.delete_btn = ttk.Button(middle, text='✕ Supprimer', command=self.delete_selected)
-        self.delete_btn.pack(fill='x', pady=5)
-        ttk.Button(middle, text='Espace disponible…', command=self.check_storage).pack(fill='x', pady=(16, 4))
-        ttk.Label(middle, text='Sélection multiple :\nCtrl ou Maj + clic', justify='center').pack(pady=20)
-        bottom = ttk.LabelFrame(self, text='Détails de la sélection', padding=10)
-        bottom.pack(fill='x', padx=12, pady=(4, 8))
-        details = ttk.Frame(bottom)
-        details.pack(fill='x')
-        self.preview = ttk.Label(details, text='Aucune miniature', anchor='center', width=34)
-        self.preview.pack(side='left', padx=(0, 16))
-        self.detail = ttk.Label(details, text='Sélectionnez une photo.', justify='left', anchor='nw')
-        self.detail.pack(side='left', fill='both', expand=True)
-        ttk.Label(self, textvariable=self.status, relief='sunken', anchor='w', padding=6).pack(fill='x')
 
-    def make_tree(self, parent, columns):
-        frame = ttk.Frame(parent)
-        frame.pack(fill='both', expand=True)
-        tree = ttk.Treeview(frame, columns=columns, show='headings', selectmode='extended')
-        for i, col in enumerate(columns):
-            tree.heading(col, text=col)
-            tree.column(col, width=170 if i == 0 else 110, minwidth=80)
-        scroll = ttk.Scrollbar(frame, orient='vertical', command=tree.yview)
-        tree.configure(yscrollcommand=scroll.set)
-        tree.pack(side='left', fill='both', expand=True)
-        scroll.pack(side='right', fill='y')
-        return tree
 
     def background(self, job, on_success=None):
         if self.busy:
-            messagebox.showinfo('Opération en cours', 'Attendez la fin de l’opération actuelle.')
+            messagebox.showinfo('Operation in progress', 'Wait until the current operation finishes.')
             return
         self.busy = True
         self.upload_btn.state(['disabled'])
@@ -370,256 +318,24 @@ class Manager(tk.Tk):
                 result = job()
                 self.q.put(('ok', result, on_success))
             except Exception as exc:
-                logging.exception('Échec opération')
+                logging.exception('Operation failed')
                 audit('operation_error', error=repr(exc))
                 self.q.put(('error', str(exc), None))
         threading.Thread(target=worker, daemon=True).start()
 
-    def poll(self):
-        try:
-            while True:
-                typ, value, callback = self.q.get_nowait()
-                if typ == 'ok':
-                    if callback: callback(value)
-                elif typ == 'error':
-                    self.status.set('ERREUR : ' + value)
-                    messagebox.showerror('Opération non confirmée', value + '\n\nVérifiez la TV avant toute nouvelle tentative.')
-                elif typ == 'preview':
-                    self.show_preview(value)
-                elif typ == 'status':
-                    self.status.set(value)
-                if typ in ('ok', 'error'):
-                    self.busy = False
-                    self.upload_btn.state(['!disabled'])
-                    self.delete_btn.state(['!disabled'])
-        except queue.Empty:
-            pass
-        self.after(100, self.poll)
-
-    def refresh_tv(self):
-        self.status.set('Lecture de la bibliothèque Samsung…')
-        self.background(tv_read, self.update_tv)
-
-    def update_tv(self, result):
-        photos, version = result
-        self.tv_items = photos
-        self.tv_tree.delete(*self.tv_tree.get_children())
-        for cid, info in sorted(photos.items()):
-            self.tv_tree.insert('', 'end', iid=cid, values=(cid,
-                f"{info.get('width', '?')}×{info.get('height', '?')}", info.get('matte_id', '?')))
-        self.status.set(f'TV : {len(photos)} photo(s) personnelles uniques · API Art {version}')
-        audit('library_read', count=len(photos), api_version=version)
-
-    def choose_folder(self):
-        folder = filedialog.askdirectory(title='Choisir le dossier de photos JPEG')
-        if not folder: return
-        self.folder = Path(folder)
-        self.local_tree.delete(*self.local_tree.get_children())
-        self.local_items = {}
-        errors = 0
-        for path in sorted(self.folder.iterdir(), key=lambda p: p.name.casefold()):
-            if path.suffix.lower() not in ('.jpg', '.jpeg', '.png') or not path.is_file(): continue
-            try:
-                info = photo_info(path)
-                self.local_items[str(path)] = info
-                self.local_tree.insert('', 'end', iid=str(path), values=(path.name,
-                    f"{info['width']}×{info['height']}", 'Oui' if info['ratio_ok'] else 'Non'))
-            except Exception:
-                errors += 1
-        self.status.set(f'Dossier : {len(self.local_items)} photo(s), {errors} fichier(s) illisible(s).')
-        audit('folder_opened', folder=str(self.folder), count=len(self.local_items), errors=errors)
-
-    def show_selected(self, side):
-        tree = self.tv_tree if side == 'tv' else self.local_tree
-        selected = tree.selection()
-        self.preview.configure(image='', text='Miniature en cours…' if len(selected) == 1 and side == 'tv' else '')
-        self.photo_ref = None
-        if len(selected) != 1:
-            self.detail.configure(text=f'{len(selected)} élément(s) sélectionné(s).\nAucun détail individuel affiché.' if selected else 'Sélectionnez une photo.')
-            return
-        key = selected[0]
-        if side == 'local':
-            info = self.local_items[key]
-            self.detail.configure(text=f"Fichier : {info['name']}\nDimensions : {info['width']} × {info['height']}\n"
-                f"Format : {info['format']}\nRatio exact 16:9 : {'OUI' if info['ratio_ok'] else 'NON'}\n"
-                f"Prêt pour la TV (JPEG 1920×1080) : {'OUI' if info['format']=='JPEG' and info['exact'] and info['bytes']<=15_000_000 else 'NON'}\n"
-                f"Taille : {info['bytes']/1024/1024:.2f} Mo\nChemin : {info['path']}")
-            self.show_preview(Path(key))
-        else:
-            info = self.tv_items[key]
-            self.detail.configure(text=f"Identifiant Samsung : {key}\nType : {info.get('content_type','?')}\n"
-                f"Dimensions : {info.get('width','?')} × {info.get('height','?')}\n"
-                f"Passe-partout : {info.get('matte_id','?')}\n"
-                f"Date Samsung : {info.get('image_date','non fournie')}\n"
-                'Miniature : récupération en cours…')
-            def work():
-                try: p = tv_thumbnail(key, info)
-                except Exception as exc:
-                    self.q.put(('preview', ('error', key, str(exc)), None))
-                    return
-                self.q.put(('preview', ('path', key, p), None))
-            threading.Thread(target=work, daemon=True).start()
-
-    def show_preview(self, value):
-        if isinstance(value, tuple):
-            kind, cid, payload = value
-            if self.tv_tree.selection() != (cid,): return
-            if kind == 'error':
-                self.preview.configure(text='Miniature indisponible')
-                self.detail.configure(text=self.detail.cget('text').replace('récupération en cours…', payload))
-                return
-            path = payload
-        else: path = value
-        try:
-            with Image.open(path) as im:
-                im = ImageOps.exif_transpose(im)
-                im.thumbnail((300, 175), Image.Resampling.LANCZOS)
-                self.photo_ref = ImageTk.PhotoImage(im.copy())
-            self.preview.configure(image=self.photo_ref, text='')
-            if isinstance(value, tuple):
-                self.detail.configure(text=self.detail.cget('text').replace('récupération en cours…', 'disponible'))
-        except Exception as exc:
-            self.preview.configure(text='Miniature illisible')
-            logging.warning('Miniature illisible : %s', exc)
 
 
-    def check_storage(self, upload_infos=None):
-        """Compare the JPEG batch size with user-supplied TV free space.
 
-During uploads, abort if the capacity estimate is unfavorable
-or the user cancels the prompt."""
-        if upload_infos is None:
-            keys = list(self.local_tree.selection())
-            candidates = [self.local_items[k] for k in keys] if keys else list(self.local_items.values())
-            infos = []
-            skipped = 0
-            for inf in candidates:
-                try:
-                    verify_upload(inf)
-                    infos.append(inf)
-                except ValueError:
-                    skipped += 1
-            if not infos:
-                messagebox.showinfo('Espace disponible',
-                    'Choisissez un dossier avec des JPEG 1920 × 1080 compatibles.')
-                return False
-        else:
-            infos = list(upload_infos)
-            skipped = 0
-        total_mb = sum(int(info['bytes']) for info in infos) / 1_000_000
-        ask = (
-            f'{len(infos)} photo(s) analysée(s) : {total_mb:.1f} Mo de fichiers JPEG.\n'
-            + (f'{skipped} fichier(s) non compatibles exclus du calcul.\n' if skipped else '')
-            + '\nSur le téléviseur : Paramètres > Assistance > Entretien de l’appareil'
-            + ' > Gérer le stockage.\n'
-            + 'Relevez l’ESPACE LIBRE et entrez sa valeur avec unité.\n'
-            + 'Exemples : 2,4 Go ou 850 Mo.\n'
-            + '\nIl s’agit d’une mesure manuelle : le logiciel ne lit pas cette valeur via l’API Art.'
-        )
-        entered = simpledialog.askstring('Vérification de l’espace — The Frame', ask, parent=self)
-        if entered is None:
-            audit('storage_preflight_cancelled', count=len(infos), sum_mb=round(total_mb, 2))
-            return False
-        try:
-            free_mb = parse_free_space_mb(entered)
-            result = estimate_capacity(infos, free_mb)
-        except ValueError as exc:
-            messagebox.showerror('Valeur invalide', str(exc))
-            return False
-        audit('storage_preflight', count=result['count'], sum_mb=round(result['sum_mb'], 2),
-              free_mb=result['free_mb'], recommended_mb=round(result['recommended_mb'], 2),
-              probably_enough=result['probably_enough'], source='user_manual_tv_display',
-              excluded_incompatible=skipped)
-        report = (
-            f"Photos compatibles : {result['count']}\n"
-            f"Taille totale des JPEG : {result['sum_mb']:.1f} Mo\n"
-            f"Espace libre déclaré de la TV : {result['free_mb']:.1f} Mo\n"
-            f"Seuil de prudence : {result['recommended_mb']:.1f} Mo\n\n"
-            'Seuil non officiel = taille JPEG × 1,5 + 300 Mo de réserve.\n'
-            'Samsung peut conserver des fichiers et des caches supplémentaires.\n'
-            'L’espace global TV peut différer du quota disponible pour les photos Art.\n'
-        )
-        if result['probably_enough']:
-            messagebox.showinfo('Espace : comparaison favorable',
-                report + '\nComparaison favorable, sans garantie de capacité Art. '
-                'Chaque importation restera vérifiée individuellement.')
-            return True
-        messagebox.showwarning('Espace possiblement insuffisant',
-            report + '\nLa marge est insuffisante selon notre règle prudente. '
-            'Réduisez le lot ou libérez de la mémoire avant de transférer.')
-        return False
 
-    def upload_selected(self):
-        keys = list(self.local_tree.selection())
-        if not keys:
-            messagebox.showinfo('Sélection', 'Sélectionnez une ou plusieurs photos dans la liste de droite.')
-            return
-        infos = [self.local_items[k] for k in keys]
-        try:
-            for info in infos: verify_upload(info)
-        except ValueError as exc:
-            messagebox.showerror('Fichier non compatible', str(exc))
-            return
-        # Check available space before any upload; the value is entered by the user.
-        if not self.check_storage(upload_infos=infos):
-            return
-        if not messagebox.askyesno('Confirmer le transfert',
-                f'Ajouter {len(infos)} photo(s) à la TV, sans passe-partout ?\n'
-                'Chaque transfert sera vérifié. Aucun fichier existant ne sera supprimé.'):
-            return
-        def work():
-            completed = []
-            for n, info in enumerate(infos, 1):
-                self.q.put(('status', f'Importation {n}/{len(infos)} : {info["name"]}', None))
-                try:
-                    cid = tv_upload(info)
-                    completed.append((info['name'], cid))
-                except Exception as exc:
-                    audit('batch_interrupted', completed=completed, failed=info['name'], error=str(exc))
-                    raise RuntimeError(f'{len(completed)} import(s) confirmé(s), arrêt sur {info["name"]} : {exc}')
-                time.sleep(1)
-            audit('batch_upload_finished', completed=completed)
-            return completed, tv_read()
-        def done(result):
-            completed, library = result
-            self.update_tv(library)
-            messagebox.showinfo('Importation terminée', f'{len(completed)} photo(s) importée(s) et vérifiée(s), passe-partout none.')
-        self.background(work, done)
 
-    def delete_selected(self):
-        ids = list(self.tv_tree.selection())
-        if not ids:
-            messagebox.showinfo('Sélection', 'Sélectionnez une ou plusieurs photos dans la liste de gauche.')
-            return
-        if not all(cid.startswith('MY_') for cid in ids):
-            messagebox.showerror('Protection', 'La suppression est réservée aux photos personnelles.')
-            return
-        if not messagebox.askyesno('CONFIRMER LA SUPPRESSION',
-                f'Supprimer définitivement {len(ids)} photo(s) du téléviseur ?\n\n'
-                + '\n'.join(ids[:10]) + ('\n…' if len(ids)>10 else '')
-                + '\n\nCette action ne peut pas être annulée.', icon='warning'):
-            return
-        def work():
-            completed = []
-            for n, cid in enumerate(ids, 1):
-                self.q.put(('status', f'Suppression {n}/{len(ids)} : {cid}', None))
-                try:
-                    tv_delete(cid)
-                    completed.append(cid)
-                except Exception as exc:
-                    audit('delete_batch_interrupted', completed=completed, failed=cid, error=str(exc))
-                    raise RuntimeError(f'{len(completed)} suppression(s) confirmée(s), arrêt sur {cid} : {exc}')
-            audit('batch_delete_finished', completed=completed)
-            return completed, tv_read()
-        def done(result):
-            completed, library = result
-            self.update_tv(library)
-            messagebox.showinfo('Suppression terminée', f'{len(completed)} photo(s) supprimée(s) et absence vérifiée.')
-        self.background(work, done)
+
+
+
+
 
     def quit_app(self):
         if self.busy:
-            if not messagebox.askyesno('Opération en cours', 'Une opération est en cours. Quitter pourrait interrompre sa vérification. Quitter ?'):
+            if not messagebox.askyesno('Operation in progress', 'An operation is in progress. Exiting may interrupt verification. Exit anyway?'):
                 return
         audit('session_end')
         self.destroy()
@@ -633,7 +349,7 @@ from pathlib import Path
 from datetime import datetime
 from PIL import Image, ImageOps
 
-LEVELS = {'Aucune': None, 'JPEG 90':90, 'JPEG 85':85, 'JPEG 80':80}
+LEVELS = {'None': None, 'JPEG 90':90, 'JPEG 85':85, 'JPEG 80':80}
 
 def now(): return datetime.now().isoformat(timespec='seconds')
 def sha(path):
@@ -661,7 +377,7 @@ def ham(a,b):return (int(a,16)^int(b,16)).bit_count()
 
 def optimize(source,quality,root):
     source=Path(source); digest=sha(source)
-    dest=Path(root)/'Optimisations'/f'JPEG_{quality}'/f'{digest[:20]}_q{quality}.jpg'
+    dest=Path(root)/'Optimizations'/f'JPEG_{quality}'/f'{digest[:20]}_q{quality}.jpg'
     dest.parent.mkdir(parents=True,exist_ok=True)
     if dest.exists():
         try:
@@ -809,18 +525,13 @@ for a deterministic migration."""
                  str(uploaded_path),cid))
             self.db.commit()
 
-    def mark_replaced(self,old_cid,new_cid):
-        """Mark the old content ID absent ONLY after verified deletion from the TV."""
-        with self.lock:
-            self.db.execute('UPDATE tv_photos SET present=0 WHERE content_id=?',(old_cid,))
-            self.db.commit()
 
-    def link(self,cid,source,method='transfert confirmé',distance=None):
+    def link(self,cid,source,method='verified upload',distance=None):
         with self.lock:
             self.db.execute('UPDATE tv_photos SET local_path=?,match_method=?,match_distance=? WHERE content_id=?',(str(Path(source).resolve()),method,distance,cid));self.db.commit()
     def filter_set(self,cid,filter_id):
         with self.lock:
-            self.db.execute('UPDATE tv_photos SET filter_id=?,filter_source=? WHERE content_id=?',(filter_id,'écrit par Manager — lecture de confirmation indisponible',cid));self.db.commit()
+            self.db.execute('UPDATE tv_photos SET filter_id=?,filter_source=? WHERE content_id=?',(filter_id,'set by Manager — cannot be independently verified',cid));self.db.commit()
     def import_old_logs(self,events):
         """Import earlier verified operation records without inventing paths or hashes."""
         log=Path(events)
@@ -849,13 +560,13 @@ for a deterministic migration."""
                     writer=csv.writer(f);writer.writerow([d[0] for d in cur.description]);writer.writerows(cur.fetchall())
         return folder
     def backup(self,extra=None):
-        folder=self.root/'Sauvegardes'/datetime.now().strftime('%Y-%m-%d_%H%M%S')
+        folder=self.root/'Backups'/datetime.now().strftime('%Y-%m-%d_%H%M%S')
         folder.mkdir(parents=True,exist_ok=True)
         with self.lock:
             dst=sqlite3.connect(folder/'manager_v2.sqlite');self.db.backup(dst);dst.close()
             content=[dict(r) for r in self.db.execute('SELECT * FROM tv_photos WHERE present=1')]
-        (folder/'photos_tv.json').write_text(json.dumps(content,ensure_ascii=False,indent=2),encoding='utf-8')
-        (folder/'parametres_tv.json').write_text(json.dumps(extra or {},ensure_ascii=False,indent=2),encoding='utf-8')
+        (folder/'tv_photos.json').write_text(json.dumps(content,ensure_ascii=False,indent=2),encoding='utf-8')
+        (folder/'tv_settings.json').write_text(json.dumps(extra or {},ensure_ascii=False,indent=2),encoding='utf-8')
         return folder
 
 
@@ -867,18 +578,18 @@ import json, ipaddress, os, tempfile
 
 DEFAULTS = {
     'ip': '',
-    'language': 'fr',
-    'jpeg_quality': 'Aucune',
+    'language': 'en',
+    'jpeg_quality': 'None',
     'force_neutral': False,
-    'matte_style': '(ne pas modifier)',
+    'matte_style': '(leave unchanged)',
     'matte_color': 'polar',
-    'art_filter': '(ne pas modifier)',
+    'art_filter': '(leave unchanged)',
     'column_widths': {'tv': [110, 92, 97, 130, 58], 'local': [96, 275, 98, 55]},
 }
-QUALITIES = ('Aucune', 'JPEG 90', 'JPEG 85', 'JPEG 80')
-MATTES = ('(ne pas modifier)', 'none', 'modernthin','modern','modernwide','flexible','shadowbox','panoramic','triptych','mix','squares')
+QUALITIES = ('None', 'JPEG 90', 'JPEG 85', 'JPEG 80')
+MATTES = ('(leave unchanged)', 'none', 'modernthin','modern','modernwide','flexible','shadowbox','panoramic','triptych','mix','squares')
 COLORS = ('black','neutral','antique','warm','polar','sand','seafoam','sage','burgandy','navy','apricot','byzantine','lavender','redorange','skyblue','turquoise')
-FILTERS = ('(ne pas modifier)','None','Aqua','ArtDeco','Ink','Wash','Pastel','Feuve')
+FILTERS = ('(leave unchanged)','None','Aqua','ArtDeco','Ink','Wash','Pastel','Feuve')
 
 
 def valid_ip(value):
@@ -886,9 +597,9 @@ def valid_ip(value):
     try:
         addr = ipaddress.ip_address(value)
     except ValueError as e:
-        raise ValueError('Adresse IPv4 invalide / Invalid IPv4 address') from e
+        raise ValueError('Invalid IPv4 address') from e
     if addr.version != 4 or addr.is_multicast or addr.is_unspecified or addr.is_loopback or addr.is_reserved:
-        raise ValueError('Adresse IPv4 locale requise / Local IPv4 address required')
+        raise ValueError('A valid local IPv4 address is required')
     return str(addr)
 
 
